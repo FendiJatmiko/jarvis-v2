@@ -1,4 +1,3 @@
-import asyncio
 import hashlib
 import json
 import os
@@ -20,7 +19,6 @@ CODE_KEYWORDS = {
     "write", "implement", "function", "class", "script", "debug", "fix",
     "refactor", "import", "def", "dockerfile", "bash", "regex", "compile",
     "npm", "pip", "test", "unittest", "pytest", "syntax", "algorithm",
-    "code", "program", "snippet", "loop", "array", "parse", "lint",
 }
 
 _sessions: dict = {}
