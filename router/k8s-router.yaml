@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ollama-router
+  namespace: ollama
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ollama-router
+  template:
+    metadata:
+      labels:
+        app: ollama-router
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: master1
+      tolerations:
+      - key: node-role.kubernetes.io/control-plane
+        operator: Exists
+        effect: NoSchedule
+      - key: node-role.kubernetes.io/etcd
+        operator: Exists
+        effect: NoExecute
+      containers:
+      - name: router
+        image: docker-registry.nzmweb.com/ollama-router:latest
+        ports:
+        - containerPort: 8080
+        env:
+        - name: OLLAMA_URL
+          value: "http://ollama.ollama.svc.cluster.local:11434"
+        - name: SESSIONS_FILE
+          value: "/data/sessions.json"
+        resources:
+          requests:
+            memory: "64Mi"
+            cpu: "50m"
+          limits:
+            memory: "256Mi"
+            cpu: "200m"
+        volumeMounts:
+        - name: sessions
+          mountPath: /data
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 5
+          periodSeconds: 30
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8080
+          initialDelaySeconds: 3
+          periodSeconds: 10
+      volumes:
+      - name: sessions
+        hostPath:
+          path: /opt/ollama-router
+          type: DirectoryOrCreate
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ollama-router
+  namespace: ollama
+spec:
+  selector:
+    app: ollama-router
+  ports:
+  - port: 80
+    targetPort: 8080
+  type: ClusterIP
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: ollama
+  namespace: ollama
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+spec:
+  ingressClassName: privreg
+  rules:
+  - host: ollama.nzmweb.com
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: ollama-router
+            port:
+              number: 80
