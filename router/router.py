@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 OLLAMA_URL = os.getenv("OLLAMA_URL", "http://ollama.ollama.svc.cluster.local:11434")
 CODE_MODEL = "qwen2.5-coder:32b"
 ANALYSIS_MODEL = "qwen2.5:72b"
+FAST_MODEL = "qwen2.5:7b"
 SESSION_TTL = 1800  # 30 minutes
 SESSIONS_FILE = Path(os.getenv("SESSIONS_FILE", "/data/sessions.json"))
 
@@ -184,10 +185,17 @@ async def openai_proxy(request: Request):
     )
 
     message = _get_last_user_message(body.get("messages", []))
-    model, context, updated = process_message(user_id, message, dict(_sessions))
-    _sessions.clear()
-    _sessions.update(updated)
-    _save_sessions(_sessions)
+    requested = body.get("model", "")
+    known_models = {CODE_MODEL, ANALYSIS_MODEL, FAST_MODEL}
+    if requested in known_models:
+        # Client explicitly chose a model — bypass routing, preserve session
+        model = requested
+        context = ""
+    else:
+        model, context, updated = process_message(user_id, message, dict(_sessions))
+        _sessions.clear()
+        _sessions.update(updated)
+        _save_sessions(_sessions)
 
     messages = _inject_context(list(body.get("messages", [])), context)
 
