@@ -23,3 +23,11 @@ def test_post_passes_timeout_and_redirects():
 def test_insecure_disables_verify():
     c = http_client.HttpClient(insecure=True)
     assert c.session.verify is False
+
+def test_caller_can_override_timeout_and_redirects():
+    c = http_client.HttpClient(timeout=15)
+    c.session = MagicMock()
+    c.get("http://x/a", timeout=3, allow_redirects=False)
+    _, kwargs = c.session.get.call_args
+    assert kwargs["timeout"] == 3
+    assert kwargs["allow_redirects"] is False

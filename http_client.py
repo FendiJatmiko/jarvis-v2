@@ -12,7 +12,11 @@ class HttpClient:
         self.timeout = timeout
 
     def get(self, url, **kw):
-        return self.session.get(url, timeout=self.timeout, allow_redirects=True, **kw)
+        kw.setdefault("timeout", self.timeout)
+        kw.setdefault("allow_redirects", True)
+        return self.session.get(url, **kw)
 
     def post(self, url, **kw):
-        return self.session.post(url, timeout=self.timeout, allow_redirects=True, **kw)
+        kw.setdefault("timeout", self.timeout)
+        kw.setdefault("allow_redirects", True)
+        return self.session.post(url, **kw)
