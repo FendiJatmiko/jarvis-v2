@@ -17,9 +17,12 @@ def explain(phase, context, llm_fn):
         for f in FIELDS:
             if obj.get(f):
                 data[f] = str(obj[f])
-    except (ValueError, json.JSONDecodeError, TypeError):
+    except Exception:
         pass
-    _render(phase, data)
+    try:
+        _render(phase, data)
+    except Exception:
+        pass
     return data
 
 
