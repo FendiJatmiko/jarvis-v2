@@ -1,0 +1,16 @@
+import json
+import learn
+
+def test_explain_parses_llm_json():
+    payload = {"WHAT":"upload bug","WHY":"no check","REQUEST":"POST /x","DEFENSE":"update"}
+    out = learn.explain("MATCH", "wp-file-manager 6.0", lambda p: json.dumps(payload))
+    assert out == payload
+
+def test_explain_blank_on_empty_llm():
+    out = learn.explain("MATCH", "ctx", lambda p: "")
+    assert set(out.keys()) == {"WHAT","WHY","REQUEST","DEFENSE"}
+    assert all(v == "(unavailable)" for v in out.values())
+
+def test_explain_never_raises_on_garbage():
+    out = learn.explain("EXPLOIT", "ctx", lambda p: "not json at all")
+    assert out["WHAT"] == "(unavailable)"
