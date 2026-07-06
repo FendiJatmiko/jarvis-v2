@@ -106,3 +106,35 @@ def test_lookup_ragflow_fallback_when_not_in_feed():
 
 def test_lookup_no_fallback_without_ragflow():
     assert wp_vulns.lookup("obscure-plugin", "1.0", feed_index={}) == []
+
+
+# ── Wordfence fetch + staleness cache ────────────────────────────────────────
+def test_refresh_feed_no_key_returns_false(tmp_path):
+    assert wp_vulns.refresh_feed(None, str(tmp_path / "f.json")) is False
+
+def test_refresh_feed_writes_cache(tmp_path, monkeypatch):
+    cache = tmp_path / "f.json"
+    resp = MagicMock(); resp.text = json.dumps({"id-1": WF_RECORD}); resp.raise_for_status = lambda: None
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **k: resp)
+    ok = wp_vulns.refresh_feed("wfi_key", str(cache))
+    assert ok is True
+    assert "vuln-plugin" in wp_vulns.load_feed(str(cache))
+
+def test_feed_index_uses_fresh_cache_without_fetch(tmp_path, monkeypatch):
+    cache = _write_feed(tmp_path)   # just-written → fresh
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not fetch")))
+    idx = wp_vulns.feed_index(cache, api_key="wfi_key")
+    assert "vuln-plugin" in idx
+
+def test_feed_index_missing_no_key_returns_empty(tmp_path):
+    assert wp_vulns.feed_index(str(tmp_path / "nope.json"), api_key=None) == {}
+
+def test_feed_index_refreshes_when_missing_and_key(tmp_path, monkeypatch):
+    cache = tmp_path / "f.json"
+    resp = MagicMock(); resp.text = json.dumps({"id-1": WF_RECORD}); resp.raise_for_status = lambda: None
+    import requests
+    monkeypatch.setattr(requests, "get", lambda *a, **k: resp)
+    idx = wp_vulns.feed_index(str(cache), api_key="wfi_key")
+    assert "vuln-plugin" in idx

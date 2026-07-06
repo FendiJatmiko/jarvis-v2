@@ -9,7 +9,11 @@ Primary source: a Wordfence-Intelligence-style feed (loaded via load_feed).
 Fallback: RAGFlow / LLM, injected as functions (no hard dependency).
 """
 import json
+import os
 import re
+import time
+
+WORDFENCE_V3_PRODUCTION = "https://www.wordfence.com/api/intelligence/v3/vulnerabilities/production"
 
 # CWE ids whose exploitation yields code execution on the server → webshell-class.
 WEBSHELL_CWES = {"434", "94", "95", "96", "98", "78", "77", "502"}
@@ -134,6 +138,40 @@ def load_feed(path):
             if sw.get("type") == "plugin" and sw.get("slug"):
                 index.setdefault(sw["slug"], []).append(rec)
     return index
+
+
+def refresh_feed(api_key, cache_path, url=WORDFENCE_V3_PRODUCTION):
+    """Fetch the Wordfence V3 feed with a Bearer key → write cache_path.
+    Returns True on success. Never raises (Track A degrades to RAGFlow)."""
+    if not api_key:
+        return False
+    try:
+        import requests
+        r = requests.get(url, headers={"Authorization": f"Bearer {api_key}"}, timeout=120)
+        r.raise_for_status()
+        with open(cache_path, "w") as f:
+            f.write(r.text)
+        return True
+    except Exception:
+        return False
+
+
+def feed_index(cache_path, api_key=None, max_age_days=7):
+    """Return the {slug: [records]} vuln index.
+
+    Uses a fresh cache if present; if stale (or missing) and an api_key is
+    available, refreshes first; if refresh isn't possible, falls back to a
+    stale cache when one exists, else {} (→ caller uses RAGFlow only).
+    """
+    fresh = False
+    if os.path.exists(cache_path):
+        age = time.time() - os.path.getmtime(cache_path)
+        fresh = age < max_age_days * 86400
+    if not fresh and api_key:
+        refresh_feed(api_key, cache_path)
+    if os.path.exists(cache_path):
+        return load_feed(cache_path)
+    return {}
 
 
 def lookup(slug, version, feed_index=None, ragflow_fn=None, llm_fn=None):
