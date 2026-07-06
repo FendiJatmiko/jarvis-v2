@@ -1,14 +1,14 @@
 import json
 
-FIELDS = ["WHAT", "WHY", "REQUEST", "DEFENSE"]
+FIELDS = ["WHAT", "WHY", "REQUEST"]
 
 
 def explain(phase, context, llm_fn):
     prompt = (
         f"Explain this pentest step for a learner. Phase: {phase}. Context: {context}. "
-        f"Return ONLY a JSON object with keys WHAT, WHY, REQUEST, DEFENSE. "
+        f"Return ONLY a JSON object with keys WHAT, WHY, REQUEST. "
         f"WHAT=vulnerability class in one line; WHY=the specific missing check; "
-        f"REQUEST=the exact HTTP request; DEFENSE=the concrete fix."
+        f"REQUEST=the exact HTTP request. Keep each value to one short line."
     )
     data = {f: "(unavailable)" for f in FIELDS}
     try:
