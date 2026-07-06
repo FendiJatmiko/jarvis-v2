@@ -34,6 +34,25 @@ def _probe_plugin(http, base, slug):
     return None
 
 
+def _secondary_signals(http, base):
+    """Confirm WordPress (and grab a version) from endpoints that survive even
+    when the home page is broken/500. Returns (is_wp: bool, version: str|None)."""
+    is_wp, version = False, None
+    _, login = _fetch(http, base + "/wp-login.php")
+    if 'name="log"' in login or 'id="loginform"' in login or "wp-submit" in login:
+        is_wp = True
+    _, wpjson = _fetch(http, base + "/wp-json/")
+    if '"namespaces"' in wpjson or '"wp/v2"' in wpjson or "rest_route" in wpjson:
+        is_wp = True
+    _, readme = _fetch(http, base + "/readme.html")
+    if "WordPress" in readme:
+        is_wp = True
+        m = re.search(r"[Vv]ersion\s+([\d.]+)", readme)
+        if m:
+            version = m.group(1)
+    return is_wp, version
+
+
 def fingerprint(base_url, http, probe_slugs=None):
     base = base_url.rstrip("/")
     home = _get_text(http, base + "/")
@@ -70,5 +89,16 @@ def fingerprint(base_url, http, probe_slugs=None):
             # Referenced on the home page but readme not reachable — record
             # it best-effort so downstream still sees the plugin exists.
             plugins.append({"slug": slug, "version": ""})
+
+    # Robustness: finding a plugin's readme.txt proves /wp-content/plugins/ is
+    # served → it IS WordPress, even if the home page 500s. And if the home was
+    # inconclusive or gave no version, fall back to login/REST/readme signals.
+    if plugins:
+        is_wp = True
+    if not is_wp or version is None:
+        sig_wp, sig_ver = _secondary_signals(http, base)
+        is_wp = is_wp or sig_wp
+        if version is None:
+            version = sig_ver
 
     return {"is_wordpress": is_wp, "version": version, "plugins": plugins, "theme": theme}

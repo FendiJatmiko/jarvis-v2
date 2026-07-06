@@ -71,6 +71,44 @@ def test_active_probe_ignores_soft_404():
     info = wp_fingerprint.fingerprint("http://t", http)
     assert info["plugins"] == []
 
+def test_wordpress_confirmed_when_home_500s_but_plugin_readme_served():
+    # the exact bug: WP bootstrap 500s on every page, but plugin readme.txt
+    # is a static file still served → we must still know it's WordPress.
+    def getter(url, **kw):
+        if url.endswith("/wp-content/plugins/wp-file-manager/readme.txt"):
+            return _resp("=== WP File Manager ===\nStable tag: 6.0\n", 200)
+        if "readme.txt" in url:
+            return _resp("", 404)
+        return _resp("<html><body>critical error</body></html>", 500)  # home + everything else 500
+    http = MagicMock(); http.get.side_effect = getter
+    info = wp_fingerprint.fingerprint("http://t", http)
+    assert info["is_wordpress"] is True
+    assert any(p["slug"] == "wp-file-manager" for p in info["plugins"])
+
+def test_wordpress_confirmed_via_wp_login_when_home_blank():
+    def getter(url, **kw):
+        if url.endswith("/wp-login.php"):
+            return _resp('<form name="loginform" id="loginform"><input name="log"></form>', 200)
+        if "readme.txt" in url:
+            return _resp("", 404)
+        return _resp("", 500)
+    http = MagicMock(); http.get.side_effect = getter
+    info = wp_fingerprint.fingerprint("http://t", http)
+    assert info["is_wordpress"] is True
+    assert info["plugins"] == []
+
+def test_version_recovered_from_readme_html():
+    def getter(url, **kw):
+        if url.endswith("/readme.html"):
+            return _resp("<h1>WordPress</h1><p>Version 6.5.2</p>", 200)
+        if "readme.txt" in url:
+            return _resp("", 404)
+        return _resp("", 500)
+    http = MagicMock(); http.get.side_effect = getter
+    info = wp_fingerprint.fingerprint("http://t", http)
+    assert info["is_wordpress"] is True
+    assert info["version"] == "6.5.2"
+
 def test_probe_slugs_override():
     def getter(url, **kw):
         if url.endswith("/wp-content/plugins/custom-plugin/readme.txt"):
