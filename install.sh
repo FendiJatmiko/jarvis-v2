@@ -10,7 +10,7 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 LIBDIR="${LIBDIR:-/opt/pentest-agent}"
 BIN="${BIN:-/usr/local/bin/pentest-agent}"
 
-MODULES="pentest-agent.py http_client.py wp_recipes.py wp_match.py wp_fingerprint.py wp_exploit.py wp_verify.py learn.py"
+MODULES="pentest-agent.py http_client.py wp_recipes.py wp_match.py wp_fingerprint.py wp_plugins_common.py wp_vulns.py wp_exploit.py wp_verify.py learn.py"
 
 echo "[*] Installing modules to $LIBDIR"
 sudo mkdir -p "$LIBDIR"
