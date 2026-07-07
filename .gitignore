@@ -29,3 +29,18 @@ Thumbs.db
 *.pdf
 *.html
 *.png
+
+# Recon tooling — scan output artifacts (regenerated each run)
+scan-*.json
+scan-*.md
+dork-report-*.json
+dork-report-*.md
+
+# Recon tooling — your own estate list (sensitive; use domains.txt.example as a template)
+domains.txt
+
+# Downloaded scanner binaries (fetched, not source)
+rustscan*
+x86-linux-rustscan.zip
+*.deb
+*.deb.zip

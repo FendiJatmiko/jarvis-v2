@@ -1,0 +1,15 @@
+# domains.txt — your own / client domains to cross-reference against scan results.
+# Copy this to domains.txt (which is gitignored) and fill in your real estate.
+#
+# One domain per line, bare hostname (no https://, no path). '#' lines are ignored.
+#
+# Auto-populate from Certificate Transparency logs (the attacker's own method):
+#   curl -s "https://crt.sh/?q=%25.example.com&output=json" \
+#     | jq -r '.[].name_value' | sed 's/\*\.//' | sort -u >> domains.txt
+#
+# Then run, e.g.:
+#   python3 scanner_dork.py --engine netlas --mine domains.txt --cn example.com
+#   python3 scanner_dork.py --engine netlas --mine domains.txt --country ID --pages 3
+
+example.com
+www.example.com
