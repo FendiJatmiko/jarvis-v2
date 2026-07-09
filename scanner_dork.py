@@ -31,17 +31,29 @@ Usage:
   # Scope the harvest to a country to save credits + raise the odds your sites appear:
   python3 scanner_dork.py --engine shodan --mine domains.txt --country ID
 
+  # Scope the harvest to one of YOUR public networks (CIDR) — see what's exposed there:
+  python3 scanner_dork.py --engine netlas --mine assets.txt --net 203.0.113.0/24
+
   # Discover YOUR OWN estate via your TLS cert (great for a subdomain farm):
   python3 scanner_dork.py --engine shodan --mine domains.txt --cn nzmweb.com
 
   # Google engine (needs entire-web CX):
   python3 scanner_dork.py --engine google --mine domains.txt
 
+The --mine file may mix domains and public IP ranges, one per line:
+      example.com
+      www.example.com
+      203.0.113.0/24        # CIDR — any harvested host whose IP lands here is flagged
+      198.51.100.7          # a bare IP is treated as a /32
+  Name entries match by exact host or subdomain; CIDR/IP entries match by IP
+  containment against each harvested record's resolved address.
+
 Output:
   scan-<timestamp>.md   — YOUR matches highlighted first, then the raw harvested pile
   scan-<timestamp>.json — full machine-readable results
 """
 import argparse
+import ipaddress
 import json
 import os
 import sys
@@ -142,16 +154,73 @@ GOOGLE_DORKS = {
 }
 
 
-def load_mine(path: str) -> set:
-    out = set()
+class Mine:
+    """Owned assets to cross-reference against harvested hosts.
+
+    Holds two kinds of entries parsed from the --mine file:
+      * registrable domains / hostnames  -> matched by name (exact or subdomain)
+      * IP networks (CIDR) / bare IPs     -> matched by IP containment
+
+    A bare IP is stored as a /32 (or /128) network, so it still matches on the
+    `ip` field of a harvested record even when the record carries no hostname.
+    """
+
+    def __init__(self):
+        self.domains = set()      # lowercased registrable domains / hosts
+        self.networks = []        # list[IPv4Network | IPv6Network]
+
+    def add(self, entry: str) -> None:
+        entry = entry.strip()
+        if not entry or entry.startswith("#"):
+            return
+        entry = entry.replace("https://", "").replace("http://", "")
+        # CIDR or bare IP?  ip_network(strict=False) accepts both (bare -> /32).
+        try:
+            self.networks.append(ipaddress.ip_network(entry, strict=False))
+            return
+        except ValueError:
+            pass
+        host = entry.split("/")[0].strip().lower()   # drop any URL path
+        if host:
+            self.domains.add(host)
+
+    def _match_ip(self, s: str) -> str:
+        if not s or not self.networks:
+            return ""
+        try:
+            addr = ipaddress.ip_address(s.strip())
+        except ValueError:
+            return ""
+        for net in self.networks:
+            if addr in net:
+                return str(net)
+        return ""
+
+    def match(self, host: str = "", ip: str = "", extra_domains=()) -> str:
+        """Return the owned identifier (domain or CIDR) this record belongs to."""
+        for cand in (host, *extra_domains):
+            m = registrable_match(cand, self.domains)
+            if m:
+                return m
+        for cand in (ip, host):
+            m = self._match_ip(cand)
+            if m:
+                return m
+        return ""
+
+    def __len__(self):
+        return len(self.domains) + len(self.networks)
+
+    def __bool__(self):
+        return bool(self.domains or self.networks)
+
+
+def load_mine(path: str) -> Mine:
+    mine = Mine()
     with open(path) as f:
         for line in f:
-            d = line.strip()
-            if not d or d.startswith("#"):
-                continue
-            d = d.replace("https://", "").replace("http://", "").split("/")[0]
-            out.add(d.lower())
-    return out
+            mine.add(line)
+    return mine
 
 
 def registrable_match(host: str, mine: set) -> str:
@@ -170,6 +239,60 @@ def domain_of(url: str) -> str:
         return urllib.parse.urlparse(url).hostname or ""
     except Exception:
         return ""
+
+
+def _valid_cidr(s: str) -> str:
+    """Canonicalize a CIDR / bare IP, or exit with a clear error."""
+    try:
+        return str(ipaddress.ip_network(s, strict=False))
+    except ValueError as e:
+        sys.exit(f"--net: {s!r} is not a valid CIDR/IP ({e})")
+
+
+def parse_nets(spec: str) -> list:
+    """Expand a --net value into a deduped list of canonical CIDRs.
+
+    Accepts a comma-separated list, a path to a wordlist file (one CIDR/IP per
+    line, '#' comments allowed), or any mix of the two:
+        --net 27.111.32.0/20,10.12.33.0/24
+        --net ranges.txt
+        --net ranges.txt,203.0.113.0/24
+    """
+    out, seen = [], set()
+    for tok in spec.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        items = []
+        if os.path.isfile(tok):
+            with open(tok) as f:
+                for line in f:
+                    line = line.split("#")[0].strip()
+                    if line:
+                        items.append(line)
+        else:
+            items.append(tok)
+        for it in items:
+            cidr = _valid_cidr(it)
+            if cidr not in seen:
+                seen.add(cidr)
+                out.append(cidr)
+    return out
+
+
+def net_chunks(nets: list, size: int):
+    """Yield the net list in chunks of `size`; a single empty chunk if no nets.
+
+    Search engines cap how many filters one query may carry, so a big --net
+    list is split across several queries rather than OR'd into one that the
+    API rejects (Netlas: 'Too many search filters provided.').
+    """
+    if not nets:
+        yield []
+        return
+    size = max(1, size)
+    for i in range(0, len(nets), size):
+        yield nets[i:i + size]
 
 
 _HOST_RE = __import__("re").compile(r"^[a-z0-9]([a-z0-9\-]{0,62}\.)+[a-z]{2,63}$")
@@ -246,7 +369,10 @@ def run_shodan(args, mine: set, ts: str) -> None:
         if args.only and cat not in {c.strip() for c in args.only.split(",")}:
             continue
         for t in tmpls:
-            queries.append((cat, t.format(country=country).strip()))
+            base = t.format(country=country).strip()
+            for chunk in net_chunks(args.nets, args.net_batch):
+                q = f"{base} net:{','.join(chunk)}".strip() if chunk else base
+                queries.append((cat, q))
 
     print(f"[*] {len(queries)} query(ies) x up to {args.pages} page(s). "
           f"Each page = 1 query credit.\n")
@@ -269,9 +395,7 @@ def run_shodan(args, mine: set, ts: str) -> None:
                            "title": title, "domains": doms}
                     raw.append(rec)
                     harvested[h].append(rec)
-                    owned = registrable_match(h, mine) or \
-                            next((registrable_match(d, mine) for d in doms
-                                  if registrable_match(d, mine)), "")
+                    owned = mine.match(h, ip, doms)
                     if owned:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
@@ -281,7 +405,7 @@ def run_shodan(args, mine: set, ts: str) -> None:
                   f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
             time.sleep(args.delay)
 
-    write_report(ts, "shodan", harvested, your_hits, raw)
+    write_report(ts, "shodan", harvested, your_hits, raw, cross_ref=bool(mine))
 
 
 # --------------------------- Censys engine ---------------------------------
@@ -361,7 +485,13 @@ def run_censys(args, mine: set, ts: str) -> None:
             if args.only and cat not in {c.strip() for c in args.only.split(",")}:
                 continue
             for t in tmpls:
-                queries.append((cat, t.format(country=country)))
+                base = t.format(country=country)
+                for chunk in net_chunks(args.nets, args.net_batch):
+                    q = base
+                    if chunk:
+                        ors = " or ".join(f"host.ip: {n}" for n in chunk)
+                        q = f"{q} and ({ors})"
+                    queries.append((cat, q))
 
     print(f"[*] {len(queries)} Censys query(ies) x up to {args.pages} page(s).\n")
     for cat, q in queries:
@@ -382,7 +512,7 @@ def run_censys(args, mine: set, ts: str) -> None:
                            "all_names": sorted(names)}
                     raw.append(rec)
                     harvested[h].append(rec)
-                    owned = registrable_match(h, mine)
+                    owned = mine.match(h, ip)
                     if owned:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
@@ -395,7 +525,7 @@ def run_censys(args, mine: set, ts: str) -> None:
                 break
             time.sleep(args.delay)
 
-    write_report(ts, "censys", harvested, your_hits, raw)
+    write_report(ts, "censys", harvested, your_hits, raw, cross_ref=bool(mine))
 
 
 # --------------------------- Netlas engine ---------------------------------
@@ -443,7 +573,13 @@ def run_netlas(args, mine: set, ts: str) -> None:
             if args.only and cat not in {c.strip() for c in args.only.split(",")}:
                 continue
             for t in tmpls:
-                queries.append((cat, t.format(country=country)))
+                base = t.format(country=country)
+                for chunk in net_chunks(args.nets, args.net_batch):
+                    q = base
+                    if chunk:
+                        ors = " OR ".join(f'ip:"{n}"' for n in chunk)   # quote: Netlas 500s on bare CIDR
+                        q = f"{q} AND ({ors})"
+                    queries.append((cat, q))
 
     print(f"[*] {len(queries)} Netlas query(ies) x up to {args.pages} page(s) "
           f"(~20 results/page).\n")
@@ -465,7 +601,7 @@ def run_netlas(args, mine: set, ts: str) -> None:
                            "all_names": sorted(names)}
                     raw.append(rec)
                     harvested[h].append(rec)
-                    owned = registrable_match(h, mine)
+                    owned = mine.match(h, ip)
                     if owned:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
@@ -475,7 +611,7 @@ def run_netlas(args, mine: set, ts: str) -> None:
                   f"({len(harvested)} unique hosts so far)")
             time.sleep(max(args.delay, 1.0))   # stay under 60/min
 
-    write_report(ts, "netlas", harvested, your_hits, raw)
+    write_report(ts, "netlas", harvested, your_hits, raw, cross_ref=bool(mine))
 
 
 # --------------------------- Google engine ---------------------------------
@@ -508,7 +644,7 @@ def run_google(args, mine: set, ts: str) -> None:
                 res = google_search_page(q, key, cx, 1 + p * 10)
                 if res["error"] == "rate_limited":
                     print("[!] Google daily quota hit — stopping.")
-                    write_report(ts, "google", harvested, your_hits, raw)
+                    write_report(ts, "google", harvested, your_hits, raw, cross_ref=bool(mine))
                     return
                 if res["error"]:
                     print(f"    [{cat}]: err {res['error']}"); break
@@ -517,50 +653,68 @@ def run_google(args, mine: set, ts: str) -> None:
                     rec = {"category": cat, "query": q, "host": h,
                            "url": it["link"], "title": it["title"]}
                     raw.append(rec); harvested[h].append(rec)
-                    owned = registrable_match(h, mine)
+                    owned = mine.match(h)
                     if owned:
                         rec["owned_domain"] = owned; your_hits.append(rec)
                         print(f"    [!!!] YOUR DOMAIN SURFACED: {h} owned:{owned}")
                 print(f"    [{cat}] p{p+1}: {len(res['items'])} results "
                       f"({len(harvested)} unique hosts)")
                 time.sleep(args.delay)
-    write_report(ts, "google", harvested, your_hits, raw)
+    write_report(ts, "google", harvested, your_hits, raw, cross_ref=bool(mine))
 
 
 # --------------------------- shared report ---------------------------------
 
-def write_report(ts, engine, harvested, your_hits, raw) -> None:
+def write_report(ts, engine, harvested, your_hits, raw, cross_ref=True) -> None:
     json_path, md_path = f"scan-{ts}.json", f"scan-{ts}.md"
     with open(json_path, "w") as f:
-        json.dump({"generated": ts, "engine": engine, "your_hits": your_hits,
+        json.dump({"generated": ts, "engine": engine, "cross_ref": cross_ref,
+                   "your_hits": your_hits,
                    "harvested_hosts": sorted(harvested.keys()), "raw": raw},
                   f, indent=2, ensure_ascii=False)
     with open(md_path, "w") as f:
         f.write(f"# Unscoped {engine} scan — {ts}\n\n")
         f.write(f"Unique hosts harvested: {len(harvested)}\n\n")
-        f.write("## 🚨 YOUR domains/hosts that surfaced in exposed results\n\n")
-        if your_hits:
-            for h in your_hits:
-                f.write(f"- **{h['host']}** (owned: `{h['owned_domain']}`) — "
-                        f"[{h['category']}] `{h['query']}`"
-                        + (f" — {h.get('url') or h.get('ip','')}\n"))
+        if cross_ref:
+            f.write("## 🚨 YOUR domains/hosts that surfaced in exposed results\n\n")
+            if your_hits:
+                for h in your_hits:
+                    f.write(f"- **{h['host']}** (owned: `{h['owned_domain']}`) — "
+                            f"[{h['category']}] `{h['query']}`"
+                            + (f" — {h.get('url') or h.get('ip','')}\n"))
+            else:
+                f.write("_None of your domains appeared in the harvested pile. "
+                        "(Caveat: results are capped per query — absence ≠ safety.)_\n")
         else:
-            f.write("_None of your domains appeared in the harvested pile. "
-                    "(Caveat: results are capped per query — absence ≠ safety.)_\n")
+            f.write("## Harvest-only run (no `--mine` cross-reference)\n\n")
+            f.write("_Pass `--mine <file>` (domains and/or public CIDRs) to flag your own "
+                    "assets in the pile below._\n")
         f.write("\n## All harvested hosts (attacker's raw target pile)\n\n")
         for host in sorted(harvested.keys()):
             cats = sorted({r["category"] for r in harvested[host]})
             f.write(f"- `{host}` — {', '.join(cats)}\n")
-    print(f"\n[*] {len(your_hits)} of your hosts surfaced · {len(harvested)} total harvested.")
+    if cross_ref:
+        print(f"\n[*] {len(your_hits)} of your hosts surfaced · {len(harvested)} total harvested.")
+    else:
+        print(f"\n[*] {len(harvested)} hosts harvested (no --mine cross-reference).")
     print(f"[*] Reports:\n    {md_path}\n    {json_path}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Attacker's-eye internet-wide dork scan; flag your exposure.")
     ap.add_argument("--engine", choices=["shodan", "google", "censys", "netlas"], default="netlas")
-    ap.add_argument("--mine", help="file of YOUR domains to flag in results")
+    ap.add_argument("--mine", help="optional file of YOUR domains and/or public CIDRs to flag "
+                                    "in results; omit for a harvest-only run")
     ap.add_argument("--pages", type=int, default=2, help="result pages per query")
     ap.add_argument("--country", help="2-letter code to scope harvest (e.g. ID)")
+    ap.add_argument("--net", help="scope the harvest to one or more public networks: a single "
+                                  "CIDR, a comma-separated list, and/or a wordlist file "
+                                  "(e.g. 203.0.113.0/24,198.51.100.0/24 or ranges.txt). "
+                                  "shodan/censys/netlas only.")
+    ap.add_argument("--net-batch", type=int, default=10, dest="net_batch",
+                    help="max CIDRs OR'd into a single query; larger --net lists are split "
+                         "into this many per query (default 10; lower it if you hit "
+                         "'Too many search filters')")
     ap.add_argument("--cn", help="find your own estate by TLS cert CN / DNS name (e.g. nzmweb.com)")
     ap.add_argument("--org", help="Censys Organization ID (or set CENSYS_ORG_ID)")
     ap.add_argument("--query", help="Censys: raw CenQL query passthrough (overrides the library)")
@@ -569,11 +723,24 @@ def main() -> None:
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between API calls")
     args = ap.parse_args()
 
-    mine = load_mine(args.mine) if args.mine else set()
-    if not args.test and not args.mine:
-        sys.exit("--mine is required (except with --test).")
+    args.nets = parse_nets(args.net) if args.net else []
+    if args.nets:
+        if args.engine == "google":
+            print("[!] --net is ignored for the google engine (no IP-range filter).")
+        else:
+            print(f"[*] Scoping harvest to {len(args.nets)} network(s): {', '.join(args.nets)}")
+            if len(args.nets) > args.net_batch:
+                chunks = -(-len(args.nets) // args.net_batch)   # ceil div
+                print(f"[*] >{args.net_batch} networks: each dork is split into {chunks} "
+                      f"net-chunks — multiplies query count (mind API credits / daily limits).")
+
+    mine = load_mine(args.mine) if args.mine else Mine()
     if mine:
-        print(f"[*] Cross-referencing against {len(mine)} owned domain(s).")
+        print(f"[*] Cross-referencing against {len(mine.domains)} owned domain(s) "
+              f"and {len(mine.networks)} network(s).")
+    elif not args.test:
+        print("[*] No --mine file: harvest-only run "
+              "(results won't be cross-referenced against your assets).")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
     if args.engine == "shodan":
