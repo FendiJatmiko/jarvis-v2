@@ -43,6 +43,22 @@ _PRECURSOR_KW = [
     ("acct-takeover", ["account takeover", "arbitrary password reset"]),
 ]
 
+# On an open-registration WordPress, these roles are effectively "anyone" — a
+# privesc that needs only one of them is a real door. Higher roles already imply
+# meaningful access, so a privesc gated behind them isn't an entry point.
+_LOW_PRIV_ROLES = ("subscriber", "contributor", "customer")
+
+
+def _precursor_reachable(title):
+    """Is this precursor an actual entry point? True if unauthenticated, or
+    authenticated but needing only a low-privilege role (subscriber/contributor
+    /customer). Authenticated privesc requiring author/editor/admin is skipped."""
+    if "unauthenticated" in title:
+        return True
+    if "authenticated" in title:
+        return any(r in title for r in _LOW_PRIV_ROLES)
+    return False
+
 
 def _cwe_ids(cwe):
     """Normalise the many shapes a 'cwe' field takes into a set of bare ids."""
@@ -57,7 +73,12 @@ def _cwe_ids(cwe):
 
 
 def classify(cwe, title):
-    """Return (webshell_relevant: bool, klass: str) for a vuln record."""
+    """Return (relevant: bool, klass: str) for a vuln record.
+
+    In-scope classes: direct server code-exec (webshell) AND privilege-
+    escalation / auth-bypass / account-takeover precursors that are a real
+    entry point (unauth, or low-priv authenticated). Everything else
+    (XSS/CSRF/IDOR/SQLi/info-disclosure) is out of scope."""
     ids = _cwe_ids(cwe)
     t = (title or "").lower()
 
@@ -76,9 +97,9 @@ def classify(cwe, title):
     for klass, kws in _WEBSHELL_KW:
         if any(k in t for k in kws):
             return True, klass
-    # 3. Precursor (grants admin → webshell) — ONLY when unauthenticated.
-    #    An authenticated privesc needs an account already, so it's not a door.
-    if "unauthenticated" in t:
+    # 3. Precursor (grants admin → webshell). In scope when it's a real entry
+    #    point: unauthenticated, or authenticated needing only a low-priv role.
+    if _precursor_reachable(t):
         if ids & {"287"}:
             return True, "auth-bypass"
         if ids & {"640"}:
@@ -145,7 +166,7 @@ def _finding(record, slug, version, source):
         "cve": record.get("cve"),
         "title": record.get("title", ""),
         "klass": klass,
-        "webshell_relevant": wr,
+        "relevant": wr,
         "patched": _patched_version(record),
         "source": source,
     }
@@ -233,7 +254,7 @@ def _ragflow_lookup(slug, version, ragflow_fn, llm_fn):
         "cve": None,
         "title": ctx.strip()[:160],
         "klass": klass,
-        "webshell_relevant": wr,
+        "relevant": wr,
         "patched": None,
         "source": "ragflow",
     }

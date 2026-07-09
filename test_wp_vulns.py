@@ -43,9 +43,23 @@ def test_classify_unauth_auth_bypass():
     wr, klass = wp_vulns.classify(["CWE-287"], "Bar <= 2.0 - Unauthenticated Authentication Bypass")
     assert wr is True and klass == "auth-bypass"
 
-def test_classify_authenticated_privesc_not_a_precursor():
-    # an *authenticated* privesc isn't an unauth door → stays out of scope
+def test_classify_low_priv_authed_privesc_is_precursor():
+    # subscriber/contributor are effectively "anyone" on open-registration WP → in scope
     wr, klass = wp_vulns.classify(["CWE-269"], "Baz <= 1.0 - Authenticated (Subscriber+) Privilege Escalation")
+    assert wr is True and klass == "privesc"
+
+def test_classify_contributor_privesc_is_precursor():
+    wr, klass = wp_vulns.classify(["CWE-269"], "Qux <= 2.0 - Authenticated (Contributor+) Privilege Escalation")
+    assert wr is True and klass == "privesc"
+
+def test_classify_high_priv_authed_privesc_skipped():
+    # needs Editor already → not an entry point → out of scope
+    wr, klass = wp_vulns.classify(["CWE-269"], "Zap <= 1.0 - Authenticated (Editor+) Privilege Escalation")
+    assert wr is False and klass == "other"
+
+def test_classify_authed_low_priv_xss_still_skipped():
+    # low-priv role but XSS (not privesc/webshell CWE) → still out of scope
+    wr, klass = wp_vulns.classify(["CWE-79"], "Shortcodes <= 7.0 - Authenticated (Contributor+) Stored XSS")
     assert wr is False and klass == "other"
 
 
@@ -102,7 +116,7 @@ def test_lookup_flags_webshell_vuln_in_range(tmp_path):
     assert len(out) == 1
     f = out[0]
     assert f["cve"] == "CVE-2024-0001"
-    assert f["webshell_relevant"] is True
+    assert f["relevant"] is True
     assert f["klass"] == "file-upload"
     assert f["patched"] == "1.3"
     assert f["source"] == "wordfence"
@@ -115,14 +129,14 @@ def test_lookup_xss_reported_but_not_webshell(tmp_path):
     idx = wp_vulns.load_feed(_write_feed(tmp_path))
     out = wp_vulns.lookup("xss-plugin", "2.0", feed_index=idx)
     assert len(out) == 1
-    assert out[0]["webshell_relevant"] is False
+    assert out[0]["relevant"] is False
 
 def test_lookup_ragflow_fallback_when_not_in_feed():
     ragflow = MagicMock(return_value="CVE-2099-1 arbitrary file upload in obscure-plugin")
     out = wp_vulns.lookup("obscure-plugin", "1.0", feed_index={}, ragflow_fn=ragflow, llm_fn=None)
     assert len(out) == 1
     assert out[0]["source"] == "ragflow"
-    assert out[0]["webshell_relevant"] is True
+    assert out[0]["relevant"] is True
 
 def test_lookup_no_fallback_without_ragflow():
     assert wp_vulns.lookup("obscure-plugin", "1.0", feed_index={}) == []
