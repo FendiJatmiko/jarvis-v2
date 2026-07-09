@@ -112,6 +112,54 @@ def classify(cwe, title):
     return False, "other"
 
 
+# Classes that don't give a shell/admin on their own, but are a plausible link
+# in a chain — with a victim (CSRF/XSS), an existing foothold (authed-only
+# privesc), or a further step (SQLi→creds, SSRF→internal). Surfaced, not
+# auto-exploited: the tool can't produce a confirmed shell from these.
+CHAIN_CWES = {
+    "352": "csrf-chain",
+    "79": "xss-chain", "80": "xss-chain",
+    "918": "ssrf",
+    "89": "sqli",
+    "639": "access-control", "566": "access-control", "1216": "access-control",
+}
+_CHAIN_KW = [
+    ("csrf-chain", ["cross-site request forgery"]),
+    ("xss-chain", ["cross-site scripting"]),
+    ("sqli", ["sql injection"]),
+    ("ssrf", ["server-side request forgery"]),
+    ("privesc-chain", ["privilege escalation"]),   # authed/high-priv → needs a foothold
+    ("auth-chain", ["authentication bypass"]),
+]
+
+
+def chain_class(cwe, title):
+    """For a finding that isn't auto-exploitable: is it a plausible chain to
+    admin/RCE (needs a victim, phishing, or an existing foothold)? Returns a
+    chain-class label, or None if genuinely out of scope."""
+    ids = _cwe_ids(cwe)
+    for cid, klass in CHAIN_CWES.items():
+        if cid in ids:
+            return klass
+    t = (title or "").lower()
+    for klass, kws in _CHAIN_KW:
+        if any(k in t for k in kws):
+            return klass
+    return None
+
+
+def _tier(cwe, title):
+    """Three-way triage → (tier, klass). tier: 'inscope' (auto-exploitable
+    webshell/privesc), 'chain' (needs victim/foothold), or 'out'."""
+    relevant, klass = classify(cwe, title)
+    if relevant:
+        return "inscope", klass
+    ck = chain_class(cwe, title)
+    if ck:
+        return "chain", ck
+    return "out", "other"
+
+
 def _vtuple(v):
     return tuple(int(x) for x in re.findall(r"\d+", str(v))) or (0,)
 
@@ -159,14 +207,15 @@ def _patched_version(record):
 
 
 def _finding(record, slug, version, source):
-    wr, klass = classify(record.get("cwe"), record.get("title"))
+    tier, klass = _tier(record.get("cwe"), record.get("title"))
     return {
         "slug": slug,
         "version": version,
         "cve": record.get("cve"),
         "title": record.get("title", ""),
         "klass": klass,
-        "relevant": wr,
+        "relevant": tier == "inscope",   # auto-exploitable (webshell/privesc)
+        "tier": tier,                    # inscope | chain | out
         "patched": _patched_version(record),
         "source": source,
     }
@@ -247,14 +296,15 @@ def _ragflow_lookup(slug, version, ragflow_fn, llm_fn):
     )
     if not ctx:
         return None
-    wr, klass = classify("", ctx)
+    tier, klass = _tier("", ctx)
     return {
         "slug": slug,
         "version": version,
         "cve": None,
         "title": ctx.strip()[:160],
         "klass": klass,
-        "relevant": wr,
+        "relevant": tier == "inscope",
+        "tier": tier,
         "patched": None,
         "source": "ragflow",
     }

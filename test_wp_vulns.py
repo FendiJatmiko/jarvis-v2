@@ -58,9 +58,39 @@ def test_classify_high_priv_authed_privesc_skipped():
     assert wr is False and klass == "other"
 
 def test_classify_authed_low_priv_xss_still_skipped():
-    # low-priv role but XSS (not privesc/webshell CWE) → still out of scope
+    # low-priv role but XSS (not privesc/webshell CWE) → not auto-exploitable
     wr, klass = wp_vulns.classify(["CWE-79"], "Shortcodes <= 7.0 - Authenticated (Contributor+) Stored XSS")
     assert wr is False and klass == "other"
+
+
+# ── chain candidates (plausible path to admin/RCE, not auto-exploitable) ──────
+def test_chain_class_csrf():
+    assert wp_vulns.chain_class(["CWE-352"], "Plugin <= 1.0 - CSRF") == "csrf-chain"
+
+def test_chain_class_xss():
+    assert wp_vulns.chain_class(["CWE-79"], "Plugin <= 1.0 - Stored XSS") == "xss-chain"
+
+def test_chain_class_sqli():
+    assert wp_vulns.chain_class(["CWE-89"], "Plugin <= 1.0 - SQL Injection") == "sqli"
+
+def test_chain_class_idor_access_control():
+    assert wp_vulns.chain_class(["CWE-639"], "Plugin <= 1.0 - Insecure Direct Object Reference") == "access-control"
+
+def test_chain_class_none_for_info_disclosure():
+    assert wp_vulns.chain_class(["CWE-200"], "Plugin <= 1.0 - Information Disclosure") is None
+
+def test_tier_three_way():
+    # webshell → inscope ; XSS → chain ; info-disclosure → out
+    assert wp_vulns._tier(["CWE-434"], "Arbitrary File Upload")[0] == "inscope"
+    assert wp_vulns._tier(["CWE-79"], "Stored XSS")[0] == "chain"
+    assert wp_vulns._tier(["CWE-200"], "Information Disclosure")[0] == "out"
+
+def test_lookup_xss_is_chain_tier(tmp_path):
+    idx = wp_vulns.load_feed(_write_feed(tmp_path))
+    out = wp_vulns.lookup("xss-plugin", "2.0", feed_index=idx)
+    assert out[0]["tier"] == "chain"
+    assert out[0]["relevant"] is False        # surfaced, but not auto-exploitable
+    assert out[0]["klass"] == "xss-chain"
 
 
 # ── version range matching ───────────────────────────────────────────────────
