@@ -1,9 +1,11 @@
 """Track A — check installed plugin versions against current vulnerability intel.
 
 Webshell-focused: every finding is classified by whether it can lead to a
-webshell (arbitrary file upload / RCE / code or command injection / RFI /
-deserialization). Non-webshell classes (XSS, CSRF, SQLi, auth-bypass) are
-reported but flagged out-of-scope so they don't distract from the objective.
+webshell — either DIRECTLY (file upload / RCE / code or command injection /
+RFI / deserialization) or as a PRECURSOR (unauth privilege-escalation /
+auth-bypass / account-takeover → admin → editor/plugin-upload → webshell,
+which Track B chains). Non-webshell classes (XSS, CSRF, SQLi) are reported
+but flagged out-of-scope so they don't distract from the objective.
 
 Primary source: a Wordfence-Intelligence-style feed (loaded via load_feed).
 Fallback: RAGFlow / LLM, injected as functions (no hard dependency).
@@ -18,6 +20,12 @@ WORDFENCE_V3_PRODUCTION = "https://www.wordfence.com/api/intelligence/v3/vulnera
 # CWE ids whose exploitation yields code execution on the server → webshell-class.
 WEBSHELL_CWES = {"434", "94", "95", "96", "98", "78", "77", "502"}
 
+# CWE ids that grant an attacker admin access (privilege escalation / broken
+# auth / missing authorization). Not code-exec themselves, but the DOOR to a
+# webshell: unauth → admin → theme/plugin editor or plugin-upload → shell.
+# These are "webshell precursors" — Track B (phase_track_b) chains them.
+PRECURSOR_CWES = {"269", "862", "863", "284", "266", "287", "640", "620"}
+
 # Title keywords used when a record carries no/'unknown' CWE.
 _WEBSHELL_KW = [
     ("file-upload", ["arbitrary file upload", "unrestricted file upload", "unrestricted upload", "file upload"]),
@@ -25,6 +33,14 @@ _WEBSHELL_KW = [
     ("command-injection", ["command injection", "os command"]),
     ("rfi", ["remote file inclusion", "local file inclusion", "file inclusion"]),
     ("deserialization", ["deserialization", "php object injection", "object injection"]),
+]
+
+# Conservative keyword fallback for the precursor class (when CWE is missing).
+_PRECURSOR_KW = [
+    ("privesc", ["privilege escalation", "administrative user creation",
+                 "arbitrary user creation", "admin account creation"]),
+    ("auth-bypass", ["authentication bypass", "auth bypass"]),
+    ("acct-takeover", ["account takeover", "arbitrary password reset"]),
 ]
 
 
@@ -43,6 +59,9 @@ def _cwe_ids(cwe):
 def classify(cwe, title):
     """Return (webshell_relevant: bool, klass: str) for a vuln record."""
     ids = _cwe_ids(cwe)
+    t = (title or "").lower()
+
+    # 1. Direct code execution — by CWE.
     if ids & WEBSHELL_CWES:
         if "434" in ids:
             return True, "file-upload"
@@ -53,10 +72,22 @@ def classify(cwe, title):
         if "502" in ids:
             return True, "deserialization"
         return True, "rce"
-    t = (title or "").lower()
+    # 2. Direct code execution — by title (when CWE is missing/unknown).
     for klass, kws in _WEBSHELL_KW:
         if any(k in t for k in kws):
             return True, klass
+    # 3. Precursor (grants admin → webshell) — ONLY when unauthenticated.
+    #    An authenticated privesc needs an account already, so it's not a door.
+    if "unauthenticated" in t:
+        if ids & {"287"}:
+            return True, "auth-bypass"
+        if ids & {"640"}:
+            return True, "acct-takeover"
+        if ids & PRECURSOR_CWES:
+            return True, "privesc"
+        for klass, kws in _PRECURSOR_KW:
+            if any(k in t for k in kws):
+                return True, klass
     return False, "other"
 
 

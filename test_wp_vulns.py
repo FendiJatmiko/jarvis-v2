@@ -29,6 +29,26 @@ def test_classify_falls_back_to_title_when_no_cwe():
     assert wr is True and klass == "file-upload"
 
 
+# ── precursor class (privesc / auth-bypass → admin → webshell) ────────────────
+def test_classify_unauth_privesc_is_precursor():
+    wr, klass = wp_vulns.classify({"id": 269, "name": "Improper Privilege Management"},
+        "LA-Studio Element Kit <= 1.5.6.3 - Unauthenticated Privilege Escalation via Backdoor")
+    assert wr is True and klass == "privesc"     # CVE-2026-0920 now FLAGGED, not skipped
+
+def test_classify_missing_authz_unauth_is_precursor():
+    wr, klass = wp_vulns.classify(["CWE-862"], "Foo <= 1.0 - Unauthenticated Privilege Escalation")
+    assert wr is True and klass == "privesc"
+
+def test_classify_unauth_auth_bypass():
+    wr, klass = wp_vulns.classify(["CWE-287"], "Bar <= 2.0 - Unauthenticated Authentication Bypass")
+    assert wr is True and klass == "auth-bypass"
+
+def test_classify_authenticated_privesc_not_a_precursor():
+    # an *authenticated* privesc isn't an unauth door → stays out of scope
+    wr, klass = wp_vulns.classify(["CWE-269"], "Baz <= 1.0 - Authenticated (Subscriber+) Privilege Escalation")
+    assert wr is False and klass == "other"
+
+
 # ── version range matching ───────────────────────────────────────────────────
 def test_in_range_inclusive_upper():
     rng = {"from_version": "*", "to_version": "6.8", "to_inclusive": True}
