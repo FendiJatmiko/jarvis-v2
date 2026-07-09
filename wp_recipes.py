@@ -35,6 +35,20 @@ def find_recipes(plugin_slug):
 # ── Track B: privilege-escalation recipes (unauth → admin account) ────────────
 # These don't upload a shell directly; they grant an ADMIN account, which the
 # authenticated-webshell stage (wp_authshell) then uses to plant a shell.
+# Privilege-escalation recipes for Track B. wp_privesc.acquire_admin dispatches
+# on "kind"; each kind reads a fixed set of fields — confirm every value against
+# the CVE's PoC before running against a real target. Shapes:
+#
+#   register-role   : {endpoint, action, user_field, email_field, pass_field,
+#                      role_param, role_value}  → creates an admin with our creds.
+#   options-update  : {endpoint, option_name_param, option_value_param,
+#                      set_options:{users_can_register:"1", default_role:"administrator"},
+#                      register_endpoint, user_field, email_field, [pass_field]}
+#                      → forces open registration + admin default role, registers.
+#   auth-bypass     : {endpoint, method:"GET"|"POST", params}  → leaves the
+#                      session authenticated as admin (returns {"authed": True}).
+#   password-reset  : {endpoint, target_user, user_param, pass_param, params}
+#                      → resets a known admin's password to one we choose.
 PRIVESC_RECIPES = [
     {
         "plugin": "lastudio-element-kit",
