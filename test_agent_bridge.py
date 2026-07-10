@@ -1,4 +1,6 @@
 # test_agent_bridge.py
+import subprocess
+
 import agent_bridge
 
 
@@ -46,3 +48,61 @@ def test_parse_verdict_error_on_nonzero_rc():
 
 def test_parse_verdict_clean():
     assert agent_bridge.parse_verdict("no webshell path found", 0) == "clean"
+
+
+class _FakeCompleted:
+    def __init__(self, stdout, returncode):
+        self.stdout = stdout
+        self.returncode = returncode
+
+
+def test_run_exploitation_records_shell_and_clean():
+    hits = [
+        {"host": "shell.com", "url": "https://shell.com", "category": "login_surfaces"},
+        {"host": "clean.com", "url": "https://clean.com", "category": "wordpress_hosts"},
+    ]
+    calls = []
+
+    def fake_runner(argv, **kw):
+        calls.append(argv)
+        if "shell.com" in argv[2]:
+            return _FakeCompleted("[VERIFY] ✅ WEBSHELL CONFIRMED via 'x'", 0)
+        return _FakeCompleted("no path", 0)
+
+    results = agent_bridge.run_exploitation(
+        hits, mode="auto", runner=fake_runner, log=lambda *_: None)
+    verdicts = {r["host"]: r["verdict"] for r in results}
+    assert verdicts == {"shell.com": "shell", "clean.com": "clean"}
+    # sequential, one call per unique host, correct argv shape
+    assert calls[0][:2] == ["python3", "./pentest-agent.py"]
+
+
+def test_run_exploitation_dry_run_spawns_nothing():
+    hits = [{"host": "a.com", "url": "https://a.com", "category": "login_surfaces"}]
+    spawned = []
+    results = agent_bridge.run_exploitation(
+        hits, dry_run=True, runner=lambda *a, **k: spawned.append(a),
+        log=lambda *_: None)
+    assert spawned == []
+    assert results[0]["verdict"] == "dry-run"
+
+
+def test_run_exploitation_timeout_does_not_abort_sweep():
+    hits = [
+        {"host": "slow.com", "url": "https://slow.com", "category": "login_surfaces"},
+        {"host": "ok.com", "url": "https://ok.com", "category": "login_surfaces"},
+    ]
+
+    def fake_runner(argv, **kw):
+        if "slow.com" in argv[2]:
+            raise subprocess.TimeoutExpired(argv, kw.get("timeout"))
+        return _FakeCompleted("no path", 0)
+
+    results = agent_bridge.run_exploitation(
+        hits, runner=fake_runner, log=lambda *_: None)
+    verdicts = {r["host"]: r["verdict"] for r in results}
+    assert verdicts == {"slow.com": "timeout", "ok.com": "clean"}
+
+
+def test_run_exploitation_empty_hits():
+    assert agent_bridge.run_exploitation([], log=lambda *_: None) == []

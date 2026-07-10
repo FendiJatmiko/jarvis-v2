@@ -4,6 +4,7 @@ Only ever operates on your_hits (the --mine cross-referenced pile). The raw
 internet harvest is never touched here. pentest-agent v0.11.0 returns exit 0
 regardless of outcome, so success is read from stdout markers, not the rc.
 """
+import subprocess
 
 
 def dedupe_targets(your_hits):
@@ -40,3 +41,43 @@ def parse_verdict(stdout, rc):
     if rc != 0:
         return "error"
     return "clean"
+
+
+def run_exploitation(your_hits, *, mode="auto", agent_path="./pentest-agent.py",
+                     timeout=600, dry_run=False, runner=subprocess.run,
+                     log=print):
+    """Fan out sequentially over the operator's OWN surfaced hosts. Never
+    touches the harvested pile. One host failing never aborts the sweep."""
+    targets = dedupe_targets(your_hits)
+    if not targets:
+        log("[EXPLOIT] no owned hosts surfaced — nothing to hand to pentest-agent")
+        return []
+
+    log(f"[EXPLOIT] {len(targets)} owned host(s) -> pentest-agent (mode={mode}):")
+    for t in targets:
+        log(f"    - {t['url']}  [{', '.join(t['categories'])}]")
+
+    if dry_run:
+        log("[EXPLOIT] --exploit-dry-run: listed targets, running nothing")
+        return [{"host": t["host"], "url": t["url"],
+                 "categories": t["categories"], "verdict": "dry-run"}
+                for t in targets]
+
+    results = []
+    for t in targets:
+        argv = build_argv(t["url"], mode, agent_path)
+        base = {"host": t["host"], "url": t["url"], "categories": t["categories"]}
+        try:
+            cp = runner(argv, capture_output=True, text=True, timeout=timeout)
+            stdout = cp.stdout or ""
+            rc = cp.returncode
+            tail = "\n".join(stdout.splitlines()[-20:])
+            results.append({**base, "rc": rc,
+                            "verdict": parse_verdict(stdout, rc), "tail": tail})
+        except subprocess.TimeoutExpired:
+            log(f"    [!] {t['url']} timed out after {timeout}s")
+            results.append({**base, "verdict": "timeout", "error": "timeout"})
+        except Exception as e:  # a broken spawn must not sink the sweep
+            log(f"    [!] {t['url']} failed: {e}")
+            results.append({**base, "verdict": "error", "error": str(e)})
+    return results
