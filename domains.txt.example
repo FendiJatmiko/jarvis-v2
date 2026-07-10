@@ -1,15 +1,54 @@
-# domains.txt — your own / client domains to cross-reference against scan results.
-# Copy this to domains.txt (which is gitignored) and fill in your real estate.
+# domains.txt — YOUR own / client assets to cross-reference against scan results.
+# Copy this to domains.txt (gitignored) and fill in your real estate.
 #
-# One domain per line, bare hostname (no https://, no path). '#' lines are ignored.
+# One entry per line. Blank lines and lines starting with '#' are ignored.
+# The parser accepts SIX shapes (mix freely in one file):
 #
-# Auto-populate from Certificate Transparency logs (the attacker's own method):
+#   1. bare domain / hostname   — matched exactly OR as a parent of any subdomain
+#   2. subdomain                — matched exactly
+#   3. bare IPv4 / IPv6         — matched by IP (stored as a /32 or /128)
+#   4. CIDR range (v4 or v6)    — matched by IP containment
+#   5. http:// or https:// URL  — the scheme is stripped, leaving the host
+#   6. host with a /path        — the path is dropped, leaving the host
+#
+# How matching works against a harvested result:
+#   - by NAME: your entry matches if a found host equals it, or is a subdomain
+#     of it. So `example.com` also catches `shop.example.com`, `a.b.example.com`.
+#   - by IP: a found host's IP is matched if it falls inside any CIDR/bare IP
+#     you list. This catches hosts that surface with NO hostname (IP only).
+
+# --- 1. bare domains / hostnames (most common) ---
+example.com
+client-site.co.id
+# `example.com` above ALSO flags any subdomain Shodan returns, e.g. blog.example.com
+
+# --- 2. explicit subdomains (when you only own that one label) ---
+shop.example.com
+mail.client-site.co.id
+
+# --- 3. bare IPs (a host that shows up with no DNS name still gets flagged) ---
+203.0.113.10
+2001:db8:abcd::25
+
+# --- 4. CIDR ranges (whole blocks you own — e.g. your Indonesian IP space) ---
+203.0.113.0/24
+198.51.100.0/22
+2001:db8:abcd::/48
+
+# --- 5. scheme-prefixed (paste straight from a browser; scheme is stripped) ---
+https://portal.example.com
+http://old.client-site.co.id
+
+# --- 6. host with a path (path is dropped; only the host is used) ---
+example.com/wp-admin
+client-site.co.id/blog/
+
+# Auto-populate domains from Certificate Transparency logs (the attacker's own method):
 #   curl -s "https://crt.sh/?q=%25.example.com&output=json" \
 #     | jq -r '.[].name_value' | sed 's/\*\.//' | sort -u >> domains.txt
 #
+# id.zone is already this shape — a list of Indonesia CIDR ranges (form 4).
+#
 # Then run, e.g.:
-#   python3 scanner_dork.py --engine netlas --mine domains.txt --cn example.com
-#   python3 scanner_dork.py --engine netlas --mine domains.txt --country ID --pages 3
-
-example.com
-www.example.com
+#   python3 scanner_dork.py --engine shodan --mine domains.txt --country ID
+#   python3 scanner_dork.py --engine shodan --mine domains.txt --country ID --exploit --exploit-dry-run
