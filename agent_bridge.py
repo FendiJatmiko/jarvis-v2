@@ -4,6 +4,8 @@ Only ever operates on your_hits (the --mine cross-referenced pile). The raw
 internet harvest is never touched here. pentest-agent v0.11.0 returns exit 0
 regardless of outcome, so success is read from stdout markers, not the rc.
 """
+import json
+import os
 import subprocess
 
 
@@ -81,3 +83,25 @@ def run_exploitation(your_hits, *, mode="auto", agent_path="./pentest-agent.py",
             log(f"    [!] {t['url']} failed: {e}")
             results.append({**base, "verdict": "error", "error": str(e)})
     return results
+
+
+def write_exploit_report(ts, results, *, report_dir="."):
+    """Fold the exploitation pass back into the scan artifacts written by
+    scanner_dork.write_report."""
+    md_path = os.path.join(report_dir, f"scan-{ts}.md")
+    json_path = os.path.join(report_dir, f"scan-{ts}.json")
+
+    with open(md_path, "a") as f:
+        f.write("\n## Exploitation pass\n\n")
+        if not results:
+            f.write("_No owned hosts were handed to pentest-agent._\n")
+        for r in results:
+            f.write(f"- **{r['url']}** — verdict **{r['verdict']}**"
+                    f" (rc={r.get('rc', 'n/a')}) "
+                    f"[{', '.join(r.get('categories', []))}]\n")
+
+    with open(json_path) as f:
+        data = json.load(f)
+    data["exploit_results"] = results
+    with open(json_path, "w") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)

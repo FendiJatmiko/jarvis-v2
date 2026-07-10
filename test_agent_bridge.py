@@ -1,4 +1,5 @@
 # test_agent_bridge.py
+import json
 import subprocess
 
 import agent_bridge
@@ -106,3 +107,22 @@ def test_run_exploitation_timeout_does_not_abort_sweep():
 
 def test_run_exploitation_empty_hits():
     assert agent_bridge.run_exploitation([], log=lambda *_: None) == []
+
+
+def test_write_exploit_report_appends_md_and_json(tmp_path):
+    ts = "TS"
+    (tmp_path / f"scan-{ts}.md").write_text("# scan\n")
+    (tmp_path / f"scan-{ts}.json").write_text(json.dumps({"engine": "shodan"}))
+    results = [
+        {"host": "a.com", "url": "https://a.com", "categories": ["login_surfaces"],
+         "rc": 0, "verdict": "shell", "tail": "WEBSHELL CONFIRMED via 'x'"},
+    ]
+    agent_bridge.write_exploit_report(ts, results, report_dir=str(tmp_path))
+
+    md = (tmp_path / f"scan-{ts}.md").read_text()
+    assert "## Exploitation pass" in md
+    assert "https://a.com" in md and "shell" in md
+
+    data = json.loads((tmp_path / f"scan-{ts}.json").read_text())
+    assert data["exploit_results"] == results
+    assert data["engine"] == "shodan"  # original content preserved
