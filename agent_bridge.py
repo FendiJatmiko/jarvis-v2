@@ -26,3 +26,17 @@ def dedupe_targets(your_hits):
 def build_argv(url, mode, agent_path):
     """The exact command used to run pentest-agent against one target."""
     return ["python3", agent_path, url, "--mode", mode]
+
+
+_SHELL_MARKERS = ("WEBSHELL CONFIRMED", "WEBSHELL via")
+
+
+def parse_verdict(stdout, rc):
+    """pentest-agent always exits 0; a confirmed shell is only visible as a
+    stdout marker. rc != 0 therefore means the process itself broke."""
+    text = stdout or ""
+    if any(m in text for m in _SHELL_MARKERS):
+        return "shell"
+    if rc != 0:
+        return "error"
+    return "clean"

@@ -24,3 +24,25 @@ def test_build_argv():
     assert agent_bridge.build_argv(
         "https://x.com", "auto", "./pentest-agent.py"
     ) == ["python3", "./pentest-agent.py", "https://x.com", "--mode", "auto"]
+
+
+def test_parse_verdict_shell_from_verify_marker():
+    out = "[VERIFY] ✅ WEBSHELL CONFIRMED via 'php.jpg'\n"
+    assert agent_bridge.parse_verdict(out, 0) == "shell"
+
+
+def test_parse_verdict_shell_from_trackb_marker():
+    out = "[TRACK-B] ✅ WEBSHELL via authenticated plugin upload (lastudio)\n"
+    assert agent_bridge.parse_verdict(out, 0) == "shell"
+
+
+def test_parse_verdict_shell_wins_over_nonzero_rc():
+    assert agent_bridge.parse_verdict("WEBSHELL CONFIRMED via 'x'", 1) == "shell"
+
+
+def test_parse_verdict_error_on_nonzero_rc():
+    assert agent_bridge.parse_verdict("some traceback", 1) == "error"
+
+
+def test_parse_verdict_clean():
+    assert agent_bridge.parse_verdict("no webshell path found", 0) == "clean"
