@@ -86,6 +86,36 @@ SHODAN_DORKS = {
         'http.title:"slot" http.html:"wp-content" {country}',
         'http.html:"judi" http.component:"WordPress" {country}',
     ],
+    # DBs speaking their native protocol straight to the internet. A --mine hit
+    # here = your database is one `mysql -h` away from being dumped. Very noisy
+    # internet-wide, but the cross-ref is what matters.
+    "exposed_databases": [
+        'product:"MySQL" port:3306 {country}',
+        'product:"MongoDB" {country}',
+        'product:"Redis" {country}',
+        'product:"PostgreSQL" port:5432 {country}',
+        'product:"Elastic" port:9200 {country}',
+    ],
+    # A WordPress whose install wizard is still reachable = one-click takeover,
+    # no exploit. The wizard's own copy is the fingerprint.
+    "unfinished_install": [
+        'http.html:"five-minute WordPress installation" {country}',
+        'http.html:"wp-admin/setup-config.php" {country}',
+    ],
+    # Server/DB control panels that should never face the internet.
+    "admin_panels": [
+        'http.title:"Adminer" {country}',
+        'http.html:"cPanel" port:2083 {country}',
+        'http.title:"Webmin" {country}',
+    ],
+    # Already-owned markers OTHER than gambling: live webshell panels (WSO /
+    # IndoXploit / b374k), pharma-spam injection. A hit is an incident.
+    "compromised_markers": [
+        'http.title:"WSO" http.html:"wp-content" {country}',
+        'http.html:"IndoXploit" {country}',
+        'http.html:"b374k" {country}',
+        'http.html:"cialis" http.component:"WordPress" {country}',
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -106,6 +136,24 @@ CENSYS_DORKS = {
     "injected_gambling": [
         'host.services.http.response.html_title:"slot"{country}',
         'host.services.http.response.body:"judi"{country}',
+    ],
+    "exposed_databases": [
+        'host.services.service_name="MYSQL"{country}',
+        'host.services.service_name="MONGODB"{country}',
+        'host.services.service_name="REDIS"{country}',
+        'host.services.service_name="ELASTICSEARCH"{country}',
+        'host.services.service_name="POSTGRES"{country}',
+    ],
+    "unfinished_install": [
+        'host.services.http.response.body:"five-minute WordPress installation"{country}',
+    ],
+    "admin_panels": [
+        'host.services.http.response.html_title="Adminer"{country}',
+        'host.services.http.response.html_title:"Webmin"{country}',
+    ],
+    "compromised_markers": [
+        'host.services.http.response.body:"IndoXploit"{country}',
+        'host.services.http.response.html_title:"WSO"{country}',
     ],
 }
 
@@ -131,6 +179,24 @@ NETLAS_DORKS = {
         'http.title:"slot"{country}',
         'http.body:"judi"{country}',
     ],
+    "exposed_databases": [
+        'port:3306{country}',
+        'port:27017{country}',
+        'port:6379{country}',
+        'port:9200{country}',
+        'port:5432{country}',
+    ],
+    "unfinished_install": [
+        'http.body:"five-minute WordPress installation"{country}',
+    ],
+    "admin_panels": [
+        'http.title:"Adminer"{country}',
+        'http.title:"Webmin"{country}',
+    ],
+    "compromised_markers": [
+        'http.body:"IndoXploit"{country}',
+        'http.title:"WSO"{country}',
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -150,6 +216,18 @@ GOOGLE_DORKS = {
     "login_surfaces": [
         'inurl:wp-login.php intitle:"Log In"',
         'inurl:xmlrpc.php intext:"XML-RPC server accepts POST requests only"',
+    ],
+    "unfinished_install": [
+        'inurl:wp-admin/install.php intitle:"WordPress"',
+        'inurl:wp-admin/setup-config.php',
+    ],
+    "admin_panels": [
+        'intitle:"Adminer" inurl:adminer',
+    ],
+    "compromised_markers": [
+        'intitle:"IndoXploit"',
+        'intitle:"WSO" inurl:.php',
+        'intext:"buy cialis" inurl:wp-content',
     ],
 }
 
