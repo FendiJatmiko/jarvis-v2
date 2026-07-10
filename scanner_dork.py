@@ -392,6 +392,15 @@ def clean_host(s: str) -> str:
 
 # --------------------------- Shodan engine ---------------------------------
 
+def _http_url(host: str, port, is_tls: bool) -> str:
+    """Reconstruct the browsable URL. Keeps the port only when non-standard so
+    https://site and http://site:8080 both read cleanly."""
+    scheme = "https" if is_tls else "http"
+    if port and int(port) not in (80, 443):
+        return f"{scheme}://{host}:{port}"
+    return f"{scheme}://{host}"
+
+
 def shodan_apiinfo(key: str) -> dict:
     r = requests.get("https://api.shodan.io/api-info", params={"key": key}, timeout=20)
     r.raise_for_status()
@@ -468,16 +477,23 @@ def run_shodan(args, mine: set, ts: str) -> None:
                 hosts = list(m.get("hostnames", [])) or []
                 doms = list(m.get("domains", [])) or []
                 title = (m.get("http") or {}).get("title") or ""
+                # Shodan flags TLS with an `ssl` block; the module name ("https",
+                # "http-simple-new", ...) is the fallback signal. Port disambiguates.
+                port = m.get("port")
+                is_tls = ("ssl" in m) or ("https" in str((m.get("_shodan") or {}).get("module", "")))
+                scheme = "https" if is_tls else "http"
                 for h in (hosts or [ip]):
                     rec = {"category": cat, "query": q, "host": h, "ip": ip,
-                           "title": title, "domains": doms}
+                           "title": title, "domains": doms,
+                           "port": port, "scheme": scheme,
+                           "url": _http_url(h, port, is_tls)}
                     raw.append(rec)
                     harvested[h].append(rec)
                     owned = mine.match(h, ip, doms)
                     if owned:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
-                        print(f"    [!!!] YOUR HOST SURFACED: {h} ({ip}) "
+                        print(f"    [!!!] YOUR HOST SURFACED: {rec['url']} ({ip}) "
                               f"owned:{owned} under [{cat}]")
             print(f"    [{cat}] p{p}: {len(res['matches'])} matches "
                   f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
@@ -769,8 +785,14 @@ def write_report(ts, engine, harvested, your_hits, raw, cross_ref=True) -> None:
                     "assets in the pile below._\n")
         f.write("\n## All harvested hosts (attacker's raw target pile)\n\n")
         for host in sorted(harvested.keys()):
-            cats = sorted({r["category"] for r in harvested[host]})
-            f.write(f"- `{host}` — {', '.join(cats)}\n")
+            recs = harvested[host]
+            cats = sorted({r["category"] for r in recs})
+            # Prefer the reconstructed URL(s) (scheme + non-standard port) so the
+            # reader sees http:// vs https:// at a glance; fall back to bare host
+            # for engines that don't yet populate a url.
+            urls = sorted({r.get("url") for r in recs if r.get("url")})
+            label = " , ".join(urls) if urls else f"`{host}`"
+            f.write(f"- {label} — {', '.join(cats)}\n")
     if cross_ref:
         print(f"\n[*] {len(your_hits)} of your hosts surfaced · {len(harvested)} total harvested.")
     else:

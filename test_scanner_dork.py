@@ -55,3 +55,22 @@ def test_exposed_databases_covers_the_big_five():
     blob = " ".join(scanner_dork.SHODAN_DORKS["exposed_databases"]).lower()
     for db in ("mysql", "mongodb", "redis", "postgresql", "elastic"):
         assert db in blob, f"exposed_databases missing {db}"
+
+
+def test_http_url_scheme_and_port():
+    u = scanner_dork._http_url
+    assert u("site.com", 443, True) == "https://site.com"       # tls, standard port hidden
+    assert u("site.com", 80, False) == "http://site.com"        # plain, standard port hidden
+    assert u("site.com", 8080, False) == "http://site.com:8080"  # non-standard shown
+    assert u("site.com", 8443, True) == "https://site.com:8443"
+    assert u("1.2.3.4", None, True) == "https://1.2.3.4"        # missing port tolerated
+
+
+def test_shodan_tls_detection_signals():
+    # mirror the inline detection: an `ssl` block OR an https module => https
+    def is_tls(m):
+        return ("ssl" in m) or ("https" in str((m.get("_shodan") or {}).get("module", "")))
+    assert is_tls({"ssl": {"versions": ["TLSv1.3"]}, "port": 443}) is True
+    assert is_tls({"_shodan": {"module": "https"}, "port": 443}) is True
+    assert is_tls({"_shodan": {"module": "http-simple-new"}, "port": 80}) is False
+    assert is_tls({"port": 80}) is False
