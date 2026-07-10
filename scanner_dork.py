@@ -64,6 +64,8 @@ from datetime import datetime, timezone
 
 import requests
 
+import agent_bridge
+
 # ---------------------------------------------------------------------------
 # Shodan queries — Shodan filter syntax (NOT Google dork syntax).
 # These surface exposed/vulnerable hosts internet-wide, as an attacker harvests.
@@ -293,6 +295,21 @@ class Mine:
         return bool(self.domains or self.networks)
 
 
+def exploit_arg_error(args):
+    """Return an error string if --exploit is misused, else None. Enforces the
+    owned-only + shodan-only invariants BEFORE any scan runs."""
+    if not getattr(args, "exploit", False):
+        return None
+    if not args.mine:
+        return ("--exploit requires --mine — only your cross-referenced hosts "
+                "are exploited, never the harvested pile")
+    if args.engine != "shodan":
+        return "--exploit is supported only with --engine shodan"
+    if not os.path.exists(args.agent_path):
+        return f"--agent-path not found: {args.agent_path}"
+    return None
+
+
 def load_mine(path: str) -> Mine:
     mine = Mine()
     with open(path) as f:
@@ -500,6 +517,13 @@ def run_shodan(args, mine: set, ts: str) -> None:
             time.sleep(args.delay)
 
     write_report(ts, "shodan", harvested, your_hits, raw, cross_ref=bool(mine))
+
+    if getattr(args, "exploit", False):
+        results = agent_bridge.run_exploitation(
+            your_hits, mode=args.exploit_mode, agent_path=args.agent_path,
+            timeout=args.exploit_timeout, dry_run=args.exploit_dry_run)
+        if not args.exploit_dry_run:
+            agent_bridge.write_exploit_report(ts, results)
 
 
 # --------------------------- Censys engine ---------------------------------
@@ -821,7 +845,19 @@ def main() -> None:
     ap.add_argument("--only", help="comma-separated categories to run")
     ap.add_argument("--test", action="store_true", help="Shodan: validate key + show plan, then exit")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between API calls")
+    ap.add_argument("--exploit", action="store_true",
+                    help="after scan, hand YOUR surfaced hosts to pentest-agent (requires --mine)")
+    ap.add_argument("--exploit-mode", choices=["auto", "plan", "safe"],
+                    default="auto", dest="exploit_mode")
+    ap.add_argument("--exploit-dry-run", action="store_true", dest="exploit_dry_run",
+                    help="list the hosts that would be exploited, run nothing")
+    ap.add_argument("--agent-path", default="./pentest-agent.py", dest="agent_path")
+    ap.add_argument("--exploit-timeout", type=int, default=600, dest="exploit_timeout")
     args = ap.parse_args()
+
+    _exploit_err = exploit_arg_error(args)
+    if _exploit_err:
+        ap.error(_exploit_err)
 
     args.nets = parse_nets(args.net) if args.net else []
     if args.nets:

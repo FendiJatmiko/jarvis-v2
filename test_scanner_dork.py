@@ -74,3 +74,40 @@ def test_shodan_tls_detection_signals():
     assert is_tls({"_shodan": {"module": "https"}, "port": 443}) is True
     assert is_tls({"_shodan": {"module": "http-simple-new"}, "port": 80}) is False
     assert is_tls({"port": 80}) is False
+
+
+# --- Task 6: --exploit argument validation -------------------------------
+import types
+
+
+def _args(**kw):
+    base = dict(exploit=False, mine=None, engine="shodan",
+                agent_path="scanner_dork.py")  # a file that exists
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def test_exploit_requires_mine():
+    err = scanner_dork.exploit_arg_error(_args(exploit=True, mine=None))
+    assert err and "--mine" in err
+
+
+def test_exploit_requires_shodan_engine():
+    err = scanner_dork.exploit_arg_error(
+        _args(exploit=True, mine="domains.txt", engine="netlas"))
+    assert err and "shodan" in err
+
+
+def test_exploit_missing_agent_path():
+    err = scanner_dork.exploit_arg_error(
+        _args(exploit=True, mine="domains.txt", agent_path="/no/such/file"))
+    assert err and "agent-path" in err
+
+
+def test_exploit_args_ok_returns_none():
+    assert scanner_dork.exploit_arg_error(
+        _args(exploit=True, mine="domains.txt")) is None
+
+
+def test_no_exploit_never_errors():
+    assert scanner_dork.exploit_arg_error(_args(exploit=False)) is None
