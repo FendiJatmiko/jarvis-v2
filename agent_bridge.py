@@ -21,3 +21,8 @@ def dedupe_targets(your_hits):
         out.append({"host": slot["host"], "url": slot["url"],
                     "categories": sorted(slot["categories"])})
     return out
+
+
+def build_argv(url, mode, agent_path):
+    """The exact command used to run pentest-agent against one target."""
+    return ["python3", agent_path, url, "--mode", mode]

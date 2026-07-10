@@ -18,3 +18,9 @@ def test_dedupe_collapses_multi_category_host():
 
 def test_dedupe_empty():
     assert agent_bridge.dedupe_targets([]) == []
+
+
+def test_build_argv():
+    assert agent_bridge.build_argv(
+        "https://x.com", "auto", "./pentest-agent.py"
+    ) == ["python3", "./pentest-agent.py", "https://x.com", "--mode", "auto"]
