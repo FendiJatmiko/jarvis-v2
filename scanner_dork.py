@@ -418,6 +418,31 @@ def _http_url(host: str, port, is_tls: bool) -> str:
     return f"{scheme}://{host}"
 
 
+def vuln_hints(match: dict) -> dict:
+    """Pull Shodan's OWN CVE / version signals off a search match.
+
+    Shodan derives `vulns` from service *banners* — infrastructure only
+    (web server, SSH, PHP, the DB), NOT WordPress plugins — and by version,
+    so they are 'possible', not confirmed. Keys prefixed '!' are Shodan's
+    'not applicable' marker and are dropped."""
+    raw = match.get("vulns") or {}
+    cves = sorted(k for k in raw if not k.startswith("!"))
+    return {"cves": cves,
+            "product": match.get("product") or "",
+            "version": match.get("version") or ""}
+
+
+def hint_label(rec: dict) -> str:
+    """Render the ' [product ver | possible CVE-…]' suffix for a record, or ''."""
+    bits = []
+    pv = " ".join(x for x in (rec.get("product"), rec.get("version")) if x)
+    if pv:
+        bits.append(pv)
+    if rec.get("cves"):
+        bits.append("possible " + ", ".join(rec["cves"][:5]))
+    return f" [{' | '.join(bits)}]" if bits else ""
+
+
 def shodan_apiinfo(key: str) -> dict:
     r = requests.get("https://api.shodan.io/api-info", params={"key": key}, timeout=20)
     r.raise_for_status()
@@ -499,11 +524,14 @@ def run_shodan(args, mine: set, ts: str) -> None:
                 port = m.get("port")
                 is_tls = ("ssl" in m) or ("https" in str((m.get("_shodan") or {}).get("module", "")))
                 scheme = "https" if is_tls else "http"
+                hints = vuln_hints(m)   # Shodan's own infra CVE/version signals
                 for h in (hosts or [ip]):
                     rec = {"category": cat, "query": q, "host": h, "ip": ip,
                            "title": title, "domains": doms,
                            "port": port, "scheme": scheme,
-                           "url": _http_url(h, port, is_tls)}
+                           "url": _http_url(h, port, is_tls),
+                           "cves": hints["cves"], "product": hints["product"],
+                           "version": hints["version"]}
                     raw.append(rec)
                     harvested[h].append(rec)
                     owned = mine.match(h, ip, doms)
@@ -511,7 +539,7 @@ def run_shodan(args, mine: set, ts: str) -> None:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
                         print(f"    [!!!] YOUR HOST SURFACED: {rec['url']} ({ip}) "
-                              f"owned:{owned} under [{cat}]")
+                              f"owned:{owned} under [{cat}]{hint_label(rec)}")
             print(f"    [{cat}] p{p}: {len(res['matches'])} matches "
                   f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
             time.sleep(args.delay)
@@ -798,8 +826,8 @@ def write_report(ts, engine, harvested, your_hits, raw, cross_ref=True) -> None:
             if your_hits:
                 for h in your_hits:
                     f.write(f"- **{h['host']}** (owned: `{h['owned_domain']}`) — "
-                            f"[{h['category']}] `{h['query']}`"
-                            + (f" — {h.get('url') or h.get('ip','')}\n"))
+                            f"[{h['category']}] `{h['query']}` — "
+                            f"{h.get('url') or h.get('ip','')}{hint_label(h)}\n")
             else:
                 f.write("_None of your domains appeared in the harvested pile. "
                         "(Caveat: results are capped per query — absence ≠ safety.)_\n")
@@ -816,7 +844,9 @@ def write_report(ts, engine, harvested, your_hits, raw, cross_ref=True) -> None:
             # for engines that don't yet populate a url.
             urls = sorted({r.get("url") for r in recs if r.get("url")})
             label = " , ".join(urls) if urls else f"`{host}`"
-            f.write(f"- {label} — {', '.join(cats)}\n")
+            cves = sorted({c for r in recs for c in r.get("cves", [])})
+            hint = hint_label({"product": "", "version": "", "cves": cves})
+            f.write(f"- {label} — {', '.join(cats)}{hint}\n")
     if cross_ref:
         print(f"\n[*] {len(your_hits)} of your hosts surfaced · {len(harvested)} total harvested.")
     else:

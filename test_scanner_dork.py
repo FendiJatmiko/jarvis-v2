@@ -111,3 +111,34 @@ def test_exploit_args_ok_returns_none():
 
 def test_no_exploit_never_errors():
     assert scanner_dork.exploit_arg_error(_args(exploit=False)) is None
+
+
+# --- Shodan vuln/version enrichment ---------------------------------------
+def test_vuln_hints_extracts_cves_product_version():
+    m = {"product": "nginx", "version": "1.18.0",
+         "vulns": {"CVE-2021-23017": {"cvss": 8.1}, "CVE-2019-9511": {}}}
+    h = scanner_dork.vuln_hints(m)
+    assert h["cves"] == ["CVE-2019-9511", "CVE-2021-23017"]   # sorted
+    assert h["product"] == "nginx" and h["version"] == "1.18.0"
+
+
+def test_vuln_hints_filters_shodan_excluded_marker():
+    # Shodan prefixes NOT-applicable CVEs with '!'
+    m = {"vulns": {"CVE-2020-0001": {}, "!CVE-2000-0000": {}}}
+    assert scanner_dork.vuln_hints(m)["cves"] == ["CVE-2020-0001"]
+
+
+def test_vuln_hints_empty_when_no_data():
+    h = scanner_dork.vuln_hints({})
+    assert h["cves"] == [] and h["product"] == "" and h["version"] == ""
+
+
+def test_hint_label_builds_bracket():
+    lbl = scanner_dork.hint_label(
+        {"product": "OpenSSH", "version": "7.4", "cves": ["CVE-2018-15473"]})
+    assert "OpenSSH 7.4" in lbl and "possible CVE-2018-15473" in lbl
+    assert lbl.startswith(" [") and lbl.endswith("]")
+
+
+def test_hint_label_empty_when_nothing():
+    assert scanner_dork.hint_label({"product": "", "version": "", "cves": []}) == ""
