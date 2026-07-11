@@ -6,7 +6,9 @@ regardless of outcome, so success is read from stdout markers, not the rc.
 """
 import json
 import os
+import select
 import subprocess
+import time
 
 
 def dedupe_targets(your_hits):
@@ -45,8 +47,37 @@ def parse_verdict(stdout, rc):
     return "clean"
 
 
+def _stream_runner(argv, capture_output=True, text=True, timeout=600):
+    """Default production runner: stream the child's output live (so a long
+    per-host pentest-agent run is visible, not a silent wait) while ALSO
+    capturing it for verdict parsing. Signature mirrors subprocess.run so tests
+    swap in a fake. Raises TimeoutExpired to match run_exploitation's handling."""
+    proc = subprocess.Popen(argv, stdout=subprocess.PIPE,
+                            stderr=subprocess.STDOUT, text=True, bufsize=1)
+    lines = []
+    deadline = time.monotonic() + (timeout or 0)
+    try:
+        while proc.poll() is None:
+            if timeout and time.monotonic() > deadline:
+                proc.kill()
+                raise subprocess.TimeoutExpired(argv, timeout)
+            ready, _, _ = select.select([proc.stdout], [], [], 1.0)
+            if ready:
+                line = proc.stdout.readline()
+                if line:
+                    lines.append(line)
+                    print("        " + line.rstrip())
+        for line in proc.stdout:            # drain whatever's buffered
+            lines.append(line)
+            print("        " + line.rstrip())
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+    return subprocess.CompletedProcess(argv, proc.returncode or 0, "".join(lines))
+
+
 def run_exploitation(your_hits, *, mode="auto", agent_path="./pentest-agent.py",
-                     timeout=600, dry_run=False, runner=subprocess.run,
+                     timeout=600, dry_run=False, runner=_stream_runner,
                      log=print):
     """Fan out sequentially over the operator's OWN surfaced hosts. Never
     touches the harvested pile. One host failing never aborts the sweep."""
@@ -66,9 +97,11 @@ def run_exploitation(your_hits, *, mode="auto", agent_path="./pentest-agent.py",
                 for t in targets]
 
     results = []
-    for t in targets:
+    total = len(targets)
+    for i, t in enumerate(targets, 1):
         argv = build_argv(t["url"], mode, agent_path)
         base = {"host": t["host"], "url": t["url"], "categories": t["categories"]}
+        log(f"[EXPLOIT] ▶ ({i}/{total}) {t['url']} — pentest-agent (≤{timeout}s):")
         try:
             cp = runner(argv, capture_output=True, text=True, timeout=timeout)
             stdout = cp.stdout or ""
