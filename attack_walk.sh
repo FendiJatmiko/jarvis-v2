@@ -14,17 +14,20 @@
 
 set -uo pipefail
 
-TARGET=""; LOUD=""; VERBOSE=""
+TARGET=""; LOUD=""; VERBOSE=""; DB=""; DBHOST=""
+USAGE="usage: $0 <url|host> [--loud] [-V|--verbose] [--db | --db-host=HOST]"
 for a in "$@"; do
   case "$a" in
     --loud)          LOUD=1 ;;
     -V|--verbose)    VERBOSE=1 ;;
-    -h|--help)       echo "usage: $0 <url|host> [--loud] [-V|--verbose]"; exit 0 ;;
-    -*)              echo "unknown option: $a"; exit 1 ;;
+    --db)            DB=1 ;;
+    --db-host=*)     DB=1; DBHOST="${a#*=}" ;;
+    -h|--help)       echo "$USAGE"; exit 0 ;;
+    -*)              echo "unknown option: $a"; echo "$USAGE"; exit 1 ;;
     *)               TARGET="$a" ;;
   esac
 done
-[ -z "$TARGET" ] && { echo "usage: $0 <url|host> [--loud] [-V|--verbose]"; exit 1; }
+[ -z "$TARGET" ] && { echo "$USAGE"; exit 1; }
 [[ "$TARGET" != http* ]] && TARGET="https://$TARGET"
 B="${TARGET%/}"                                  # base, no trailing slash
 CURL=(curl -sk --max-time 15 -A "Mozilla/5.0 (attack_walk)")   # -k: clone may be self-signed
@@ -166,11 +169,77 @@ else
   printf '\n  (skipping B5 amplified brute demo — run with --loud on the clone to watch it work)\n'
 fi
 
+############################################################################
+if [ -n "$DB" ]; then
+DBH="${DBHOST:-$(echo "$B" | sed -E 's#^https?://##; s#[:/].*##')}"
+hr "PHASE C — exposed_databases  (DBs reachable straight over their own port)"
+obj "Reach a database on its native port and get in WITHOUT the web app — read/dump, or run OS commands."
+why "A DB on the public internet is a finding by itself; trust-mode/weak creds or unauth (redis/ES) = instant access."
+printf '  probing DB host: %s\n' "$DBH"
+
+for svc in postgres:5432 mysql:3306 redis:6379 mongodb:27017 elasticsearch:9200; do
+  name="${svc%%:*}"; port="${svc##*:}"
+  if ! timeout 5 bash -c "echo > /dev/tcp/$DBH/$port" 2>/dev/null; then
+    ok "$name/$port — closed/filtered"
+    continue
+  fi
+  hit "$name port $port OPEN on $DBH"
+
+  case "$name" in
+    redis)
+      # Redis speaks a trivial text protocol; an unauth PING returns +PONG.
+      resp=$(timeout 5 bash -c "exec 3<>/dev/tcp/$DBH/6379; printf 'PING\r\n' >&3; head -c 32 <&3" 2>/dev/null)
+      if printf '%s' "$resp" | grep -qi PONG; then
+        hit "  redis has NO AUTH — anyone who reaches the port can read/write the DB"
+        [ -n "$LOUD" ] && command -v redis-cli >/dev/null && \
+          redis-cli -h "$DBH" INFO server 2>/dev/null | head -4 | sed 's/^/    proof> /'
+      elif printf '%s' "$resp" | grep -qi NOAUTH; then
+        ok "  redis requires auth (good)"
+      fi
+      ;;
+    elasticsearch)
+      # ES on 9200 is HTTP; unauth cluster info means the whole index is readable.
+      es=$("${CURL[@]}" "http://$DBH:9200/" )
+      if printf '%s' "$es" | grep -qi "cluster_name\|You Know, for Search"; then
+        hit "  elasticsearch is UNAUTH — cluster/data readable over HTTP"
+        [ -n "$LOUD" ] && "${CURL[@]}" "http://$DBH:9200/_cat/indices?v" | head -5 | sed 's/^/    proof> /'
+      fi
+      ;;
+    postgres)
+      if [ -n "$LOUD" ] && command -v psql >/dev/null; then
+        v=$(PGCONNECT_TIMEOUT=5 psql "host=$DBH port=5432 user=postgres dbname=postgres" \
+              -tAc "select version();" 2>/dev/null)
+        [ -n "$v" ] && hit "  postgres TRUST/no-password login worked → $v" \
+                    || ok  "  postgres wants a password (good) — try postgres_login brute separately"
+        why "  RCE primitive once in as superuser:  COPY (SELECT '') TO PROGRAM 'id';"
+      else
+        printf '    (open — run with --loud and psql installed to test trust/no-password login)\n'
+      fi
+      ;;
+    mysql)
+      if [ -n "$LOUD" ] && command -v mysql >/dev/null; then
+        v=$(mysql -h "$DBH" -u root --connect-timeout=5 -N -e "select version();" 2>/dev/null)
+        [ -n "$v" ] && hit "  mysql root/no-password login worked → $v" \
+                    || ok  "  mysql wants a password (good)"
+      else
+        printf '    (open — run with --loud and the mysql client to test root/no-password login)\n'
+      fi
+      ;;
+    mongodb)
+      printf '    (open — verify unauth access with: mongosh "mongodb://%s:27017" --eval "db.adminCommand({listDatabases:1})")\n' "$DBH"
+      ;;
+  esac
+done
+fix "Bind DBs to localhost (listen_addresses='localhost'), firewall the port; never 'trust' / 0.0.0.0; strong unique password; non-superuser app role kills COPY..PROGRAM RCE. Docker: no '-p 5432:5432'."
+fi
+
+############################################################################
 if [ -n "$VERBOSE" ]; then
 hr "DONE — remediation summary"
 cat <<'EOF'
   exposed_listings : Options -Indexes / autoindex off; backups out of webroot; deny .bak/.sql/.env/.git; rotate leaked creds.
   login_surfaces   : block/limit xmlrpc.php; kill username enumeration; take phpMyAdmin off the internet; strong passwords + 2FA.
+  exposed_databases: bind DB to localhost + firewall the port; never trust/0.0.0.0; strong password; non-superuser role; no docker -p.
   The single highest-value fix: get any leaked wp-config/.sql backup out of the webroot — that one file is 'game over' by itself.
 EOF
 else
