@@ -14,23 +14,33 @@
 
 set -uo pipefail
 
-TARGET="${1:-}"
-LOUD="${2:-}"
-[ -z "$TARGET" ] && { echo "usage: $0 <url|host> [--loud]"; exit 1; }
+TARGET=""; LOUD=""; VERBOSE=""
+for a in "$@"; do
+  case "$a" in
+    --loud)          LOUD=1 ;;
+    -V|--verbose)    VERBOSE=1 ;;
+    -h|--help)       echo "usage: $0 <url|host> [--loud] [-V|--verbose]"; exit 0 ;;
+    -*)              echo "unknown option: $a"; exit 1 ;;
+    *)               TARGET="$a" ;;
+  esac
+done
+[ -z "$TARGET" ] && { echo "usage: $0 <url|host> [--loud] [-V|--verbose]"; exit 1; }
 [[ "$TARGET" != http* ]] && TARGET="https://$TARGET"
 B="${TARGET%/}"                                  # base, no trailing slash
 CURL=(curl -sk --max-time 15 -A "Mozilla/5.0 (attack_walk)")   # -k: clone may be self-signed
 
 hr(){ printf '\n\033[1m━━━ %s ━━━\033[0m\n' "$1"; }
-obj(){ printf '  OBJECTIVE: %s\n' "$1"; }
-why(){ printf '  WHY      : %s\n' "$1"; }
-fix(){ printf '  \033[32mFIX      : %s\033[0m\n' "$1"; }
-hit(){ printf '  \033[31m[HIT]\033[0m %s\n' "$1"; }
-ok(){  printf '  [ok]  %s\n' "$1"; }
+# OBJECTIVE / WHY / FIX are teaching prose — only shown with -V/--verbose.
+obj(){ [ -n "$VERBOSE" ] && printf '  OBJECTIVE: %s\n' "$1"; :; }
+why(){ [ -n "$VERBOSE" ] && printf '  WHY      : %s\n' "$1"; :; }
+fix(){ [ -n "$VERBOSE" ] && printf '  \033[32mFIX      : %s\033[0m\n' "$1"; :; }
+hit(){  printf '  \033[31m[HIT ]\033[0m %s\n' "$1"; }   # a real finding (bad)
+ok(){   printf '  \033[2m[safe]\033[0m %s\n' "$1"; }    # NOT a finding (good)
 
 code(){ "${CURL[@]}" -o /dev/null -w '%{http_code}' "$1"; }   # HTTP status of a URL
 
-echo "Target: $B   (loud=${LOUD:-no})"
+echo "Target: $B   (loud=$([ -n "$LOUD" ] && echo yes || echo no), verbose=$([ -n "$VERBOSE" ] && echo yes || echo no))"
+[ -z "$VERBOSE" ] && echo "(tip: add -V for OBJECTIVE/WHY/FIX explanations on each step)"
 
 ############################################################################
 hr "PHASE A — exposed_listings  (the server leaking raw files)"
@@ -45,7 +55,7 @@ for d in / /wp-content/ /wp-content/uploads/ /wp-includes/ /wp-content/upgrade/ 
   if "${CURL[@]}" "$B$d" | grep -qi "index of"; then
     hit "$B$d  → directory listing EXPOSED"
   else
-    ok "$B$d"
+    ok "$B$d — no listing"
   fi
 done
 fix "Apache: 'Options -Indexes'   nginx: 'autoindex off;'  (and don't rely on empty index.html)."
@@ -63,13 +73,13 @@ for f in wp-config.php.bak wp-config.php.save wp-config.php.old "wp-config.php~"
     hit "$B/$f  → HTTP 200 (readable)"
     case "$f" in *config*|*.sql|*.env) FOUND_SECRET="$B/$f" ;; esac
   else
-    ok "$f ($c)"
+    ok "$f — absent (HTTP $c)"
   fi
 done
 fix "Move backups OUT of the webroot; deny .bak/.sql/.old/.env/.git at the server; rotate any creds already exposed."
 
 # ---- A3: pull the loot (loud) ----------------------------------------------
-if [ "$LOUD" = "--loud" ] && [ -n "$FOUND_SECRET" ]; then
+if [ -n "$LOUD" ] && [ -n "$FOUND_SECRET" ]; then
   hr "A3. Extract credentials from the leaked file  [LOUD]"
   obj "Prove the leak is game-over by reading the DB credentials straight out of the file."
   why "With DB creds an attacker connects directly, or forges login cookies from the AUTH salts."
@@ -125,12 +135,12 @@ obj "Find a web DB console (phpMyAdmin/Adminer) — a direct GUI into the databa
 why "If reachable, weak/leaked creds = full read/write on the DB, no WordPress needed."
 for p in phpmyadmin pma dbadmin adminer mysql _phpmyadmin; do
   c=$(code "$B/$p/")
-  [ "$c" = "200" ] && hit "$B/$p/  → HTTP 200 (DB UI exposed)" || ok "$p/ ($c)"
+  [ "$c" = "200" ] && hit "$B/$p/  → HTTP 200 (DB UI exposed)" || ok "$p/ — absent (HTTP $c)"
 done
 fix "Never expose DB UIs to the internet: bind to localhost + SSH-tunnel, or IP-allowlist."
 
 # ---- B5: multicall brute demo (loud) ---------------------------------------
-if [ "$LOUD" = "--loud" ]; then
+if [ -n "$LOUD" ]; then
   hr "B5. Amplified brute-force via system.multicall  [LOUD]"
   U=$(echo "$USERS" | head -1); U=${U:-admin}
   obj "Show how ONE xmlrpc request tests many passwords against '$U' — the actual attack."
@@ -156,9 +166,13 @@ else
   printf '\n  (skipping B5 amplified brute demo — run with --loud on the clone to watch it work)\n'
 fi
 
+if [ -n "$VERBOSE" ]; then
 hr "DONE — remediation summary"
 cat <<'EOF'
   exposed_listings : Options -Indexes / autoindex off; backups out of webroot; deny .bak/.sql/.env/.git; rotate leaked creds.
   login_surfaces   : block/limit xmlrpc.php; kill username enumeration; take phpMyAdmin off the internet; strong passwords + 2FA.
   The single highest-value fix: get any leaked wp-config/.sql backup out of the webroot — that one file is 'game over' by itself.
 EOF
+else
+  printf '\n(done — add -V for objectives, explanations, and the remediation summary)\n'
+fi
