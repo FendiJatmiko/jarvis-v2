@@ -37,6 +37,37 @@ def test_enumerates_plugin_and_version():
     assert slugs.get("wp-file-manager") == "6.0"
     assert info["theme"] == "astra"
 
+def test_revslider_version_from_asset_query():
+    # ?ver= on a revslider asset IS the plugin version
+    home = ('<link href="http://t/wp-content/plugins/revslider/public/assets/'
+            'css/rs6.css?ver=6.6.0" />')
+    assert wp_fingerprint._revslider_version(MagicMock(), "http://t", home) == "6.6.0"
+
+def test_revslider_version_old_rev_query():
+    home = ('<link href="http://t/wp-content/plugins/revslider/rs-plugin/css/'
+            'settings.css?rev=4.6.5" />')
+    assert wp_fingerprint._revslider_version(MagicMock(), "http://t", home) == "4.6.5"
+
+def test_revslider_version_release_log_fallback():
+    http = MagicMock()
+    http.get.side_effect = lambda url, **kw: _resp("6.3.1 - 2023-01-01\n6.3.0 ...") \
+        if "release_log" in url else _resp("", 404)
+    # no asset query in home → falls back to release_log.txt
+    assert wp_fingerprint._revslider_version(http, "http://t", "<html></html>") == "6.3.1"
+
+def test_fingerprint_fills_revslider_version_from_home():
+    home = ('<meta name="generator" content="WordPress 4.4.33" />'
+            '<script src="http://t/wp-content/plugins/revslider/public/assets/js/'
+            'rs6.min.js?ver=5.4.8"></script>')
+    def getter(url, **kw):
+        if url.rstrip("/") == "http://t":
+            return _resp(home)
+        return _resp("", 404)      # no readmes → revslider stays blank until refiner
+    http = MagicMock(); http.get.side_effect = getter
+    info = wp_fingerprint.fingerprint("http://t", http)
+    rev = {p["slug"]: p["version"] for p in info["plugins"]}.get("revslider")
+    assert rev == "5.4.8"          # would gate the <=3.0.95 recipe off → no blind fire
+
 def test_non_wordpress_site():
     http = MagicMock(); http.get.side_effect = lambda url, **kw: _resp("<html>hello</html>")
     info = wp_fingerprint.fingerprint("http://t", http)
