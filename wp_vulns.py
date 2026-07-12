@@ -112,6 +112,30 @@ def classify(cwe, title):
     return False, "other"
 
 
+def precondition(cwe, title):
+    """For an IN-SCOPE (code-exec-class) finding, how self-contained is it?
+    The webshell CWEs alone over-state 'auto-exploitable' — an authenticated or
+    deserialization bug isn't a clean unauth shell. Returns:
+      self-contained  — unauth direct code exec (the genuinely automatable ones)
+      needs-lowpriv   — authenticated, but only subscriber/contributor/customer
+      needs-auth      — authenticated at author/editor/admin (a foothold, not entry)
+      needs-gadget    — object injection / deserialization: needs a POP chain elsewhere
+      needs-lfi-chain — file inclusion: needs url_include or an includable file
+    This is heuristic (title/CWE), NOT a guarantee a self-contained one is truly
+    weaponizable — per-CVE reality still decides (e.g. paper RCEs)."""
+    ids = _cwe_ids(cwe)
+    t = (title or "").lower()
+    if "502" in ids or "object injection" in t or "deserial" in t:
+        return "needs-gadget"
+    if "authenticated" in t and "unauthenticated" not in t:
+        if any(r in t for r in _LOW_PRIV_ROLES):
+            return "needs-lowpriv"
+        return "needs-auth"
+    if "file inclusion" in t or "98" in ids:
+        return "needs-lfi-chain"
+    return "self-contained"
+
+
 # Classes that don't give a shell/admin on their own, but are a plausible link
 # in a chain — with a victim (CSRF/XSS), an existing foothold (authed-only
 # privesc), or a further step (SQLi→creds, SSRF→internal). Surfaced, not
@@ -208,7 +232,7 @@ def _patched_version(record):
 
 def _finding(record, slug, version, source):
     tier, klass = _tier(record.get("cwe"), record.get("title"))
-    return {
+    f = {
         "slug": slug,
         "version": version,
         "cve": record.get("cve"),
@@ -219,6 +243,9 @@ def _finding(record, slug, version, source):
         "patched": _patched_version(record),
         "source": source,
     }
+    if tier == "inscope":
+        f["precondition"] = precondition(record.get("cwe"), record.get("title"))
+    return f
 
 
 def load_feed(path):
@@ -297,7 +324,7 @@ def _ragflow_lookup(slug, version, ragflow_fn, llm_fn):
     if not ctx:
         return None
     tier, klass = _tier("", ctx)
-    return {
+    f = {
         "slug": slug,
         "version": version,
         "cve": None,
@@ -308,3 +335,6 @@ def _ragflow_lookup(slug, version, ragflow_fn, llm_fn):
         "patched": None,
         "source": "ragflow",
     }
+    if tier == "inscope":
+        f["precondition"] = precondition("", ctx)
+    return f

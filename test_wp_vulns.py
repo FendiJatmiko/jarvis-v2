@@ -63,6 +63,41 @@ def test_classify_authed_low_priv_xss_still_skipped():
     assert wr is False and klass == "other"
 
 
+# ── precondition: how self-contained is an in-scope finding really ────────────
+def test_precondition_unauth_file_upload_is_self_contained():
+    assert wp_vulns.precondition(["CWE-434"], "Unauthenticated Arbitrary File Upload") == "self-contained"
+
+def test_precondition_admin_file_upload_needs_auth():
+    assert wp_vulns.precondition(["CWE-434"],
+        "RevSlider <= 6.6.12 - Authenticated (Administrator+) Arbitrary File Upload") == "needs-auth"
+
+def test_precondition_subscriber_upload_needs_lowpriv():
+    assert wp_vulns.precondition(["CWE-434"],
+        "Foo <= 1.0 - Authenticated (Subscriber+) Arbitrary File Upload") == "needs-lowpriv"
+
+def test_precondition_deserialization_needs_gadget():
+    assert wp_vulns.precondition(["CWE-502"],
+        "Master Slider Pro <= 3.6.5 - Unauthenticated PHP Object Injection") == "needs-gadget"
+
+def test_precondition_object_injection_by_title_needs_gadget():
+    assert wp_vulns.precondition([], "Unauthenticated PHP Object Injection") == "needs-gadget"
+
+def test_precondition_file_inclusion_needs_chain():
+    assert wp_vulns.precondition(["CWE-98"], "Unauthenticated Remote File Inclusion") == "needs-lfi-chain"
+
+def test_finding_carries_precondition_for_inscope():
+    f = wp_vulns._finding(
+        {"cve": "CVE-x", "cwe": ["CWE-434"], "title": "Unauthenticated Arbitrary File Upload",
+         "software": []}, "p", "1.0", "wordfence")
+    assert f["precondition"] == "self-contained"
+
+def test_finding_no_precondition_key_when_out_of_scope():
+    f = wp_vulns._finding(
+        {"cve": "CVE-y", "cwe": ["CWE-200"], "title": "Information Disclosure", "software": []},
+        "p", "1.0", "wordfence")
+    assert "precondition" not in f     # only in-scope findings get graded
+
+
 # ── chain candidates (plausible path to admin/RCE, not auto-exploitable) ──────
 def test_chain_class_csrf():
     assert wp_vulns.chain_class(["CWE-352"], "Plugin <= 1.0 - CSRF") == "csrf-chain"
