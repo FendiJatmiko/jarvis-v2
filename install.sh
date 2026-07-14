@@ -10,11 +10,15 @@ SRC="$(cd "$(dirname "$0")" && pwd)"
 LIBDIR="${LIBDIR:-/opt/pentest-agent}"
 BIN="${BIN:-/usr/local/bin/pentest-agent}"
 
-MODULES="pentest-agent.py http_client.py wp_recipes.py wp_match.py wp_fingerprint.py wp_plugins_common.py wp_vulns.py wp_exploit.py wp_verify.py learn.py"
+# Top-level modules; the WordPress logic now lives in the `wp/` package,
+# which is copied wholesale below so every submodule ships (authshell, sqli,
+# credattack, privesc, ... — the old flat list silently omitted several).
+MODULES="pentest-agent.py http_client.py learn.py"
 
 echo "[*] Installing modules to $LIBDIR"
-sudo mkdir -p "$LIBDIR"
+sudo mkdir -p "$LIBDIR/wp"
 for m in $MODULES; do sudo cp "$SRC/$m" "$LIBDIR/"; done
+sudo cp "$SRC"/wp/*.py "$LIBDIR/wp/"
 
 echo "[*] Writing launcher to $BIN"
 sudo tee "$BIN" >/dev/null <<EOF

@@ -1,5 +1,5 @@
-# test_wp_match.py
-import wp_match
+# test_match.py
+from wp import match as wp_match
 from unittest.mock import MagicMock
 import json
 

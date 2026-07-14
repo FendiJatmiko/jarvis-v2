@@ -9,7 +9,7 @@ import re
 import secrets
 import zipfile
 
-import wp_exploit
+from . import exploit as wp_exploit
 
 _NONCE_RE = re.compile(r'name="_wpnonce"\s+value="([0-9a-zA-Z]+)"')
 

@@ -1,6 +1,6 @@
-# test_wp_fingerprint.py
+# test_fingerprint.py
 from unittest.mock import MagicMock
-import wp_fingerprint
+from wp import fingerprint as wp_fingerprint
 
 HOME_HTML = '''
 <html><head><meta name="generator" content="WordPress 6.4.2" /></head>
@@ -139,6 +139,26 @@ def test_version_recovered_from_readme_html():
     info = wp_fingerprint.fingerprint("http://t", http)
     assert info["is_wordpress"] is True
     assert info["version"] == "6.5.2"
+
+def test_active_probe_covers_privesc_and_sqli_plugins():
+    # Plugins we only have a privesc- or sqli-recipe for (no Track-A upload
+    # recipe, not in COMMON_SLUGS) must STILL be actively probed — otherwise
+    # Track B / SQLi can never fire because the plugin is never detected.
+    present = {"lastudio-element-kit": "1.5.0",   # PRIVESC_RECIPES (CVE-2026-0920)
+               "wp-google-map-plugin": "4.9.0"}   # SQLI_RECIPES  (CVE-2026-2580)
+    def getter(url, **kw):
+        for slug, ver in present.items():
+            if url.endswith(f"/wp-content/plugins/{slug}/readme.txt"):
+                return _resp(f"=== x ===\nStable tag: {ver}\n", 200)
+        if "readme.txt" in url:
+            return _resp("", 404)
+        return _resp('<meta name="generator" content="WordPress 6.4" />', 200)
+    http = MagicMock(); http.get.side_effect = getter
+    info = wp_fingerprint.fingerprint("http://t", http)
+    slugs = {p["slug"] for p in info["plugins"]}
+    assert "lastudio-element-kit" in slugs
+    assert "wp-google-map-plugin" in slugs
+
 
 def test_probe_slugs_override():
     def getter(url, **kw):

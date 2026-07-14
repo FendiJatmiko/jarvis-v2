@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-import wp_verify
+from wp import verify as wp_verify
 
 def _resp(text):
     r = MagicMock(); r.text = text; r.status_code = 200; return r

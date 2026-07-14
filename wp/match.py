@@ -1,6 +1,6 @@
 import re
 import json
-import wp_recipes
+from . import recipes as wp_recipes
 
 
 def _ver_tuple(v):

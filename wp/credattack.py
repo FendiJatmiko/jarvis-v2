@@ -7,7 +7,7 @@ that authenticates, the session is left logged in for the plant-shell stage.
 Safety: a hard attempt cap and password-major ordering. Intended for AUTHORISED
 targets — real logins can lock accounts or look like a DoS.
 """
-import wp_authshell
+from . import authshell as wp_authshell
 
 COMMON_USERS = ["admin", "administrator", "root", "wpadmin", "webmaster", "test"]
 COMMON_PASSWORDS = [
