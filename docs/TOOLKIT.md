@@ -32,18 +32,7 @@
 
 ## 2. `scanner_dork.py` — internet-wide exposure scanner
 
-Runs unscoped fingerprint dorks, harvests every host that surfaces, and (with `--mine`) flags which are yours.
-
-### Engines (`--engine`)
-
-| Engine | Auth (env var) | Notes |
-|--------|----------------|-------|
-| `shodan` | `SHODAN_API_KEY` | **Primary.** Search API needs a paid membership + query credits. `--exploit` works only here. |
-| `netlas` | `NETLAS_API_KEY` | Free-tier search available. |
-| `censys` | `CENSYS_PAT` (+ `CENSYS_ORG_ID`/`--org`) | Censys Platform (CenQL). |
-| `google` | `GOOGLE_API_KEY` + `GOOGLE_CX` | Supplementary; Google restricts internet-wide search. |
-
-Default engine is `netlas`. Pass `--engine shodan` for the real thing.
+Runs unscoped fingerprint dorks against Shodan, harvests every host that surfaces, and (with `--mine`) flags which are yours. Needs `SHODAN_API_KEY`; the search API requires a paid membership + query credits (a free key can only run `--test`).
 
 ### Categories (the 8 things it hunts) & danger
 
@@ -69,20 +58,17 @@ These are **infrastructure** CVEs (web server / SSH / PHP / DB), inferred from b
 
 | Option | Meaning |
 |--------|---------|
-| `--engine {shodan,google,censys,netlas}` | Which source to query (default `netlas`). |
 | `--mine FILE` | File of YOUR domains/IPs/CIDRs to flag in results. Omit = harvest-only. See §6. |
 | `--pages N` | Result pages per query (default 2). Each page = 1 query credit. |
 | `--country XX` | 2-letter code to scope the harvest (e.g. `ID`). |
-| `--net NET` | Scope to CIDR(s): one, comma-list, or a wordlist file (e.g. `id.zone`). shodan/censys/netlas only. |
+| `--net NET` | Scope to CIDR(s): one, comma-list, or a wordlist file (e.g. `id.zone`). |
 | `--net-batch N` | Max CIDRs OR'd per query (default 10); big `--net` lists split into chunks. |
 | `--cn NAME` | Find your own estate by TLS cert CN / DNS name. |
-| `--org ID` | Censys Organization ID (or `CENSYS_ORG_ID`). |
-| `--query Q` | Censys: raw CenQL passthrough. |
 | `--only CATS` | Comma-separated categories to run (subset of the 8 above). |
-| `--test` | Shodan: validate key + show plan/credits, then exit. |
+| `--test` | Validate key + show plan/credits, then exit. |
 | `--delay S` | Seconds between API calls (default 1.0). |
 
-### `--exploit` chaining options (Shodan only)
+### `--exploit` chaining options
 
 | Option | Meaning |
 |--------|---------|
@@ -100,11 +86,11 @@ Writes `scan-<timestamp>.md` (human) and `scan-<timestamp>.json` (machine). Each
 ### Examples
 ```bash
 export SHODAN_API_KEY=...
-python3 scanner_dork.py --engine shodan --test                              # validate key + credits
-python3 scanner_dork.py --engine shodan --mine domains.txt --country ID     # scan Indonesia, flag yours
-python3 scanner_dork.py --engine shodan --mine domains.txt --net id.zone     # scope to your CIDRs
-python3 scanner_dork.py --engine shodan --mine domains.txt --only login_surfaces,exposed_databases
-python3 scanner_dork.py --engine shodan --mine domains.txt --exploit --exploit-dry-run   # preview chain
+python3 scanner_dork.py --test                              # validate key + credits
+python3 scanner_dork.py --mine domains.txt --country ID     # scan Indonesia, flag yours
+python3 scanner_dork.py --mine domains.txt --net id.zone     # scope to your CIDRs
+python3 scanner_dork.py --mine domains.txt --only login_surfaces,exposed_databases
+python3 scanner_dork.py --mine domains.txt --exploit --exploit-dry-run   # preview chain
 ```
 
 ---
@@ -233,9 +219,6 @@ One entry per line; `#` comments and blanks ignored. Six shapes, mix freely:
 | Variable | Used by | For |
 |----------|---------|-----|
 | `SHODAN_API_KEY` | scanner_dork | Shodan search (paid plan + credits) |
-| `NETLAS_API_KEY` | scanner_dork | Netlas engine |
-| `CENSYS_PAT` / `CENSYS_ORG_ID` | scanner_dork | Censys engine |
-| `GOOGLE_API_KEY` / `GOOGLE_CX` | scanner_dork | Google engine |
 | `WORDFENCE_API_KEY` | pentest-agent | SCAN vuln feed |
 
 ---
@@ -244,7 +227,7 @@ One entry per line; `#` comments and blanks ignored. Six shapes, mix freely:
 
 **A. See what an attacker sees about your farm (safe):**
 ```bash
-python3 scanner_dork.py --engine shodan --mine domains.txt --country ID
+python3 scanner_dork.py --mine domains.txt --country ID
 ```
 
 **B. Deep-inspect one flagged site, no exploitation:**
@@ -254,8 +237,8 @@ python3 pentest-agent.py https://flagged-site.tld --mode plan
 
 **C. Full auto chain across owned hits (preview first!):**
 ```bash
-python3 scanner_dork.py --engine shodan --mine domains.txt --exploit --exploit-dry-run
-python3 scanner_dork.py --engine shodan --mine domains.txt --exploit          # then for real
+python3 scanner_dork.py --mine domains.txt --exploit --exploit-dry-run
+python3 scanner_dork.py --mine domains.txt --exploit          # then for real
 ```
 
 **D. Understand a specific exposure hands-on (on a clone):**

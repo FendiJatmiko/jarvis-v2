@@ -10,7 +10,7 @@ vulns, recipes, exploit, privesc, credattack, sqli, authshell, verify).
 ## TL;DR
 
 ```bash
-make install-stag      # builds an isolated venv + a `pentest-agent` launcher
+make -f Makefile.pentest-agent install      # builds an isolated venv + a `pentest-agent` launcher
 pentest-agent --version
 ```
 
@@ -38,7 +38,7 @@ installed, and on modern distros you often *can't* `pip install` into it anyway
 old `install.sh` launcher that calls system `python3` — blows up the moment it
 hits `import requests`.
 
-**The fix is `make install-stag`.** It does two things that together make the
+**The fix is `make -f Makefile.pentest-agent install`.** It does two things that together make the
 error impossible:
 
 1. Creates a dedicated virtualenv at `~/.local/share/pentest-agent/venv` and
@@ -61,26 +61,32 @@ runs with the right dependencies **from any directory**, and you never have to
 ## Prerequisites
 
 - **Python 3.9+** (developed against 3.12).
-- **The venv module.** On Debian/Ubuntu this is a separate package:
+- **The venv module *and* pip.** On Debian/Ubuntu these are two separate
+  packages — installing only `python3-venv` gets you a venv with no pip
+  inside it, which fails later with a confusing `No module named pip`:
 
   ```bash
-  sudo apt install python3-venv
+  sudo apt install python3-venv python3-pip
   ```
 
-  If it's missing, `make install-stag` will tell you exactly this.
+  If either is missing, `make -f Makefile.pentest-agent install` checks for
+  this upfront and tells you exactly what to install. If you already hit the
+  `No module named pip` error before this check existed, just re-run
+  `make -f Makefile.pentest-agent install` — it now detects a pip-less venv
+  left over from a previous attempt and rebuilds it automatically.
 
 ---
 
 ## Install
 
 ```bash
-make install-stag
+make -f Makefile.pentest-agent install
 ```
 
 You'll see verbose, step-by-step output:
 
 ```
-── Installing pentest-agent (staging) ──────────────────────────────
+── Installing pentest-agent ─────────────────────────────────────────
 ==> [1/3] Checking prerequisites
     found Python 3.12.3 at /usr/bin/python3
 ==> [2/3] Preparing virtualenv at ~/.local/share/pentest-agent/venv
@@ -116,7 +122,7 @@ exec $SHELL -l
 Override `PREFIX` to install elsewhere (both the venv and launcher move):
 
 ```bash
-make install-stag PREFIX=/opt/tools     # venv -> /opt/tools/share/..., launcher -> /opt/tools/bin
+make -f Makefile.pentest-agent install PREFIX=/opt/tools     # venv -> /opt/tools/share/..., launcher -> /opt/tools/bin
 ```
 
 ---
@@ -124,14 +130,14 @@ make install-stag PREFIX=/opt/tools     # venv -> /opt/tools/share/..., launcher
 ## Verify it works
 
 ```bash
-make check-stag        # runs `pentest-agent --version`, prints OK on success
+make -f Makefile.pentest-agent check    # runs `pentest-agent --version`, prints OK on success
 ```
 
 or directly, from any directory (proving you don't need a venv shell):
 
 ```bash
 cd /tmp && pentest-agent --version
-# -> pentest-agent.py 0.15.0
+# -> pentest-agent.py 0.16.0
 ```
 
 ---
@@ -144,8 +150,8 @@ Both installers also install a man page, so you get full documentation offline:
 man pentest-agent
 ```
 
-- `make install-stag` puts it at `$PREFIX/share/man/man1/pentest-agent.1`
-  (default `~/.local/share/man/man1/`).
+- `make -f Makefile.pentest-agent install` puts it at
+  `$PREFIX/share/man/man1/pentest-agent.1` (default `~/.local/share/man/man1/`).
 - `install.sh` puts it at `/usr/local/share/man/man1/pentest-agent.1`.
 
 Both locations are already on the default `MANPATH` (the per-user one because
@@ -168,20 +174,21 @@ using the venv's interpreter. Two consequences:
 - **Edits take effect immediately.** Change `pentest-agent.py` or anything under
   `wp/`, and the next `pentest-agent` run picks it up. No reinstall needed.
 - **Don't move or delete the repo.** The launcher holds an absolute path to it.
-  If you move the checkout, run `make reinstall-stag` from the new location to
-  rewrite the launcher's paths.
+  If you move the checkout, run `make -f Makefile.pentest-agent reinstall` from
+  the new location to rewrite the launcher's paths.
 
 ---
 
 ## Update / rebuild / uninstall
 
 ```bash
-make reinstall-stag    # rewrite the launcher (e.g. after moving the repo)
-make uninstall-stag    # remove the launcher and the venv
+make -f Makefile.pentest-agent reinstall    # rewrite the launcher (e.g. after moving the repo)
+make -f Makefile.pentest-agent uninstall    # remove the launcher and the venv
 ```
 
 To pull new Python dependencies after editing `requirements.txt`, just re-run
-`make install-stag` — it reuses the existing venv and installs any additions.
+`make -f Makefile.pentest-agent install` — it reuses the existing venv and
+installs any additions.
 
 ---
 
@@ -209,12 +216,12 @@ deactivate
 
 ## System-wide install (`install.sh`)
 
-For a shared, system-wide install (as opposed to the per-user `make install-stag`),
-use `install.sh`. It copies the modules to `/opt/pentest-agent`, builds an isolated
-venv **there**, installs the dependencies into it, and writes a launcher to
-`/usr/local/bin/pentest-agent` that runs the tool with that venv's interpreter —
-so it is immune to the `ModuleNotFoundError` described above just like
-`make install-stag`.
+For a shared, system-wide install (as opposed to the per-user
+`make -f Makefile.pentest-agent install`), use `install.sh`. It copies the
+modules to `/opt/pentest-agent`, builds an isolated venv **there**, installs
+the dependencies into it, and writes a launcher to `/usr/local/bin/pentest-agent`
+that runs the tool with that venv's interpreter — so it is immune to the
+`ModuleNotFoundError` described above just like the Makefile install.
 
 ```bash
 ./install.sh                                   # -> /opt/pentest-agent, launcher in /usr/local/bin
@@ -226,8 +233,9 @@ your password. Unlike the `make` launcher (which runs the tool **in place** from
 this checkout), `install.sh` runs the **copy** under `/opt`, so edits to the repo
 don't take effect until you re-run it.
 
-**Which one?** `make install-stag` for a live-editable, per-user install from this
-checkout; `install.sh` for a frozen, system-wide copy shared by all users.
+**Which one?** `make -f Makefile.pentest-agent install` for a live-editable,
+per-user install from this checkout; `install.sh` for a frozen, system-wide
+copy shared by all users.
 
 ---
 
