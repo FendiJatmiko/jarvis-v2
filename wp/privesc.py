@@ -130,7 +130,11 @@ def _password_reset(base, http, recipe):
 # WP exposes a REST nonce in-page (wpApiSettings) for logged-out visitors; a
 # missing-permission endpoint usually ignores it, but send it when present so
 # the recipe also fires on installs that still gate on X-WP-Nonce.
-_REST_NONCE = re.compile(r"""["']nonce["']\s*:\s*["']([A-Za-z0-9]{6,})["']""")
+# The key itself may or may not be quoted -- wp_localize_script always emits
+# valid JSON ("nonce":"..."), but plugins with hand-rolled inline JS (e.g.
+# Kirki's window.wp_kirki = {...}) commonly use a bare object key (nonce:"...")
+# instead. \b guards against matching inside a longer identifier (xnonce:).
+_REST_NONCE = re.compile(r"""\bnonce["']?\s*:\s*["']([A-Za-z0-9]{6,})["']""")
 
 
 def _harvest_rest_nonce(base, http, recipe):

