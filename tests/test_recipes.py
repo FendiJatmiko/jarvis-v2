@@ -107,3 +107,21 @@ def test_opal_estate_privesc_recipe_present():
     assert r["pass_confirm_field"] == "password1"
     assert r["nonce_from"]["field"] == "opalestate-register-nonce"
     assert r["source"] == "registry"
+
+
+def test_essential_addons_privesc_recipe_present():
+    recs = wp_recipes.find_privesc("essential-addons-for-elementor-lite")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cve"] == "CVE-2023-32243"
+    assert r["kind"] == "password-reset"
+    assert r["affected"] == ">=5.4.0,<=5.7.1"
+    assert r["endpoint"] == "/wp-admin/admin-ajax.php"
+    assert r["target_user"] == "admin"
+    assert r["user_param"] == "rp_login"
+    assert r["pass_param"] == "eael-pass1"
+    assert r["pass_confirm_param"] == "eael-pass2"
+    assert r["params"]["action"] == "login_or_register_user"
+    assert r["params"]["eael-resetpassword-submit"] == "1"
+    assert r["nonce_from"] == {"url": "/", "key": "nonce", "param": "eael-resetpassword-nonce"}
+    assert r["source"] == "registry"

