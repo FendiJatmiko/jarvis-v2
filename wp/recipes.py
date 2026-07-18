@@ -268,13 +268,15 @@ PRIVESC_RECIPES = [
         "success_marker": "Email sent",
         "source": "registry",
         "note": "Unauth arbitrary-email password reset (CVE-2026-8206, missing "
-                "permission check). Confirm-only: reset link is emailed to the "
-                "attacker; finish takeover from that mailbox. REQUIRES the "
-                "target to have a Kirki page-builder page with a Forgot-"
-                "Password (or sibling) ComponentLibrary element -- otherwise "
-                "no page ever exposes the action-scoped nonce validate_nonce() "
-                "demands, and the request fails 'Not authorized' even though "
-                "the permission check itself is real and missing.",
+                "permission check). Reset link is emailed to the attacker. REQUIRES "
+                "the target to have a Kirki page-builder page with a Forgot-Password "
+                "(or sibling) ComponentLibrary element -- otherwise no page exposes "
+                "the action-scoped nonce validate_nonce() demands ('KirkiComponent"
+                "Library_kirki-forgot-password', sent as the X-WP-ELEMENT-NONCE "
+                "header) and the request fails 'Not authorized'. COMPLETABLE with one "
+                "manual step: scrape that nonce → --oob-nonce fires the OOB; read the "
+                "reset key from the attacker email → --oob-reset-key finishes the WP "
+                "reset (complete_reset_key) → admin login → webshell. Verified live.",
     },
     {
         "plugin": "opal-estate-pro",

