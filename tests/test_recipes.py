@@ -27,10 +27,19 @@ def test_wpdiscuz_recipe_harvests_nonce_instead_of_hardcoding_empty():
 def test_find_unknown_returns_empty():
     assert wp_recipes.find_recipes("does-not-exist") == []
 
+# Modes that read the REAL stored path back out of the server's response instead
+# of templating a guess (wpdiscuz stores at an unguessable
+# /uploads/YYYY/MM/<name>-<microtime>.php and returns the url in its JSON).
+RESPONSE_PATH_MODES = {"comment-image-upload"}
+
 def test_all_recipes_have_required_keys():
-    required = {"plugin","cve","affected","method","endpoint","params","field","upload_path","source","note"}
+    required = {"plugin","cve","affected","method","endpoint","params","field","source","note"}
     for r in wp_recipes.RECIPES:
         assert required <= set(r.keys()), f"missing keys in {r.get('plugin')}"
+        # upload_path is required only for recipes that template their landing
+        # path; response-path modes derive it from the reply and omit it.
+        if r.get("mode") not in RESPONSE_PATH_MODES:
+            assert "upload_path" in r, f"missing upload_path in {r.get('plugin')}"
 
 
 def test_kirki_oob_takeover_recipe_present():
