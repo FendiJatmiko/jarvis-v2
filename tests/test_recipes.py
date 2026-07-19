@@ -173,3 +173,20 @@ def test_wp_automatic_sqli_recipe_present():
     assert r["params"]["auth"] == "\x00"          # NULL byte, not literal "%00"
     assert r["integrity"] == {"param": "integ", "algo": "md5"}
     assert r["source"] == "registry"
+
+
+def test_lastudio_privesc_recipe_present():
+    recs = wp_recipes.find_privesc("lastudio-element-kit")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cve"] == "CVE-2026-0920"
+    assert r["affected"] == "<=1.5.6.3"
+    assert r["endpoint"] == "/wp-admin/admin-ajax.php"
+    assert r["action"] == "lakit_ajax"
+    assert r["envelope"] == {"subaction": "register", "id": "0"}
+    assert r["role_param"] == "lakit_bkrole" and r["role_value"] == "administrator"
+    assert r["extra_params"] == {"lakit_field_log": "yes", "lakit_field_pwd": "yes",
+                                  "lakit_field_cpwd": "yes"}
+    assert r["nonce_from"] == {"url": "/", "key": "ajaxNonce",
+                               "object": "LaStudioKitSettings", "param": "_nonce"}
+    assert r["source"] == "registry"

