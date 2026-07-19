@@ -125,3 +125,51 @@ def test_essential_addons_privesc_recipe_present():
     assert r["params"]["eael-resetpassword-submit"] == "1"
     assert r["nonce_from"] == {"url": "/", "key": "nonce", "param": "eael-resetpassword-nonce"}
     assert r["source"] == "registry"
+
+
+def test_king_addons_upload_recipe_present():
+    recs = wp_recipes.find_recipes("king-addons")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cve"] == "CVE-2025-6327"
+    assert r["affected"] == "<=51.1.14"
+    assert r["endpoint"] == "/wp-admin/admin-ajax.php"
+    assert r["params"]["action"] == "king_addons_upload_file"
+    assert r["params"]["triggering_event"] == "click"
+    assert r["field"] == "uploaded_file"
+    assert r["upload_path"] == "/wp-content/uploads/king-addons/forms/{filename}"
+    assert r["nonce_from"] == {"url": "/", "key": "nonce", "object": "KingAddonsFormBuilderData",
+                               "param": "king_addons_fb_nonce"}
+    assert r["source"] == "registry"
+
+
+def test_king_addons_privesc_recipe_present():
+    recs = wp_recipes.find_privesc("king-addons")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cve"] == "CVE-2025-6325"
+    assert r["kind"] == "register-role"
+    assert r["affected"] == "<=51.1.14"
+    assert r["endpoint"] == "/wp-admin/admin-ajax.php"
+    assert r["action"] == "king_addons_user_register"
+    assert r["user_field"] == "username" and r["email_field"] == "email"
+    assert r["pass_field"] == "password" and r["pass_confirm_field"] == "confirm_password"
+    assert r["role_param"] == "user_role" and r["role_value"] == "administrator"
+    assert r["nonce_from"] == {"url": "/", "key": "register_nonce",
+                               "object": "king_addons_login_register_vars", "param": "nonce"}
+    assert r["source"] == "registry"
+
+
+def test_wp_automatic_sqli_recipe_present():
+    recs = wp_recipes.find_sqli("wp-automatic")
+    assert len(recs) == 1
+    r = recs[0]
+    assert r["cve"] == "CVE-2024-27956"
+    assert r["affected"] == "<=3.92.0"
+    assert r["kind"] == "time-blind"
+    assert r["method"] == "GET"
+    assert r["endpoint"] == "/wp-content/plugins/wp-automatic/inc/csv.php"
+    assert r["inject_param"] == "q"
+    assert r["params"]["auth"] == "\x00"          # NULL byte, not literal "%00"
+    assert r["integrity"] == {"param": "integ", "algo": "md5"}
+    assert r["source"] == "registry"

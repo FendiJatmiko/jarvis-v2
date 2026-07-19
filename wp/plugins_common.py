@@ -29,4 +29,6 @@ COMMON_SLUGS = [
     "wpdiscuz", "disqus-comment-system",
     # misc high-install
     "wp-smushit", "wpml", "loginizer", "google-site-kit", "wp-google-maps",
+    # premium autoblogging — not on wp.org, mass-exploited (CVE-2024-27956 SQLi)
+    "wp-automatic",
 ]

