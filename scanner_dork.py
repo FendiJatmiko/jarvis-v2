@@ -1,44 +1,35 @@
 #!/usr/bin/env python3
 """
 scanner_dork.py — attacker's-eye view: run UNSCOPED internet-wide dork/fingerprint
-queries, harvest every host that surfaces, then flag any of YOUR (or your clients')
-domains that landed in the "exposed / vulnerable" pile.
+queries against Shodan, harvest every host that surfaces, then flag any of YOUR
+(or your clients') domains that landed in the "exposed / vulnerable" pile.
 
 This replicates the attacker DISCOVERY step: they don't target you by name — they
 scan the whole internet for a vulnerable fingerprint and you either show up or you
 don't. This tool lets you see what they'd see.
 
-TWO ENGINES:
-
-  --engine shodan   (recommended, what attackers actually use for whole-internet)
-      Purpose-built internet-wide scanner, indexed by fingerprint, proper API.
-      Needs a Shodan API key.  Note: the search API requires a paid Shodan
-      membership + query credits; a free key can only call --test / api-info.
+ENGINE: Shodan only — the purpose-built internet-wide scanner attackers actually
+use, indexed by fingerprint, with a proper API. Needs a Shodan API key. Note: the
+search API requires a paid Shodan membership + query credits; a free key can only
+call --test / api-info.
       Setup:  shodan.io -> register -> Account -> copy API key
               export SHODAN_API_KEY=...
 
-  --engine google   (supplementary; Google restricts internet-wide PSE by design)
-      Google Custom Search JSON API with a CX set to "search entire web".
-      Setup:  export GOOGLE_API_KEY=...   export GOOGLE_CX=...
-
 Usage:
   # Validate your Shodan key + see plan / remaining query credits (free, no credits used):
-  python3 scanner_dork.py --engine shodan --test
+  python3 scanner_dork.py --test
 
   # Harvest internet-wide WordPress/exposed hosts and flag your own domains:
-  python3 scanner_dork.py --engine shodan --mine domains.txt
+  python3 scanner_dork.py --mine domains.txt
 
   # Scope the harvest to a country to save credits + raise the odds your sites appear:
-  python3 scanner_dork.py --engine shodan --mine domains.txt --country ID
+  python3 scanner_dork.py --mine domains.txt --country ID
 
   # Scope the harvest to one of YOUR public networks (CIDR) — see what's exposed there:
-  python3 scanner_dork.py --engine netlas --mine assets.txt --net 203.0.113.0/24
+  python3 scanner_dork.py --mine assets.txt --net 203.0.113.0/24
 
   # Discover YOUR OWN estate via your TLS cert (great for a subdomain farm):
-  python3 scanner_dork.py --engine shodan --mine domains.txt --cn nzmweb.com
-
-  # Google engine (needs entire-web CX):
-  python3 scanner_dork.py --engine google --mine domains.txt
+  python3 scanner_dork.py --mine domains.txt --cn nzmweb.com
 
 The --mine file may mix domains and public IP ranges, one per line:
       example.com
@@ -58,7 +49,6 @@ import json
 import os
 import sys
 import time
-import urllib.parse
 from collections import defaultdict
 from datetime import datetime, timezone
 
@@ -117,119 +107,6 @@ SHODAN_DORKS = {
         'http.html:"IndoXploit" {country}',
         'http.html:"b374k" {country}',
         'http.html:"cialis" http.component:"WordPress" {country}',
-    ],
-}
-
-# ---------------------------------------------------------------------------
-# Censys Platform queries — Censys Query Language (CenQL), internet-wide.
-# {country} -> ` and host.location.country_code="XX"` when --country given.
-# ---------------------------------------------------------------------------
-CENSYS_DORKS = {
-    "wordpress_hosts": [
-        'host.services.software.product="WordPress"{country}',
-    ],
-    "exposed_listings": [
-        'host.services.http.response.html_title="Index of /"{country}',
-    ],
-    "login_surfaces": [
-        'host.services.http.response.body:"xmlrpc.php"{country}',
-        'host.services.http.response.html_title="phpMyAdmin"{country}',
-    ],
-    "injected_gambling": [
-        'host.services.http.response.html_title:"slot"{country}',
-        'host.services.http.response.body:"judi"{country}',
-    ],
-    "exposed_databases": [
-        'host.services.service_name="MYSQL"{country}',
-        'host.services.service_name="MONGODB"{country}',
-        'host.services.service_name="REDIS"{country}',
-        'host.services.service_name="ELASTICSEARCH"{country}',
-        'host.services.service_name="POSTGRES"{country}',
-    ],
-    "unfinished_install": [
-        'host.services.http.response.body:"five-minute WordPress installation"{country}',
-    ],
-    "admin_panels": [
-        'host.services.http.response.html_title="Adminer"{country}',
-        'host.services.http.response.html_title:"Webmin"{country}',
-    ],
-    "compromised_markers": [
-        'host.services.http.response.body:"IndoXploit"{country}',
-        'host.services.http.response.html_title:"WSO"{country}',
-    ],
-}
-
-# ---------------------------------------------------------------------------
-# Netlas queries — Netlas query language, internet-wide, FREE-TIER SEARCH.
-# {country} -> ` AND geo.country:XX` when --country given.
-# ---------------------------------------------------------------------------
-NETLAS_DORKS = {
-    "wordpress_hosts": [
-        'http.body:"wp-content"{country}',
-    ],
-    "joomla_hosts": [
-        'http.body:"/media/system/js/"{country}',
-        'http.title:"Joomla"{country}',
-    ],
-    "exposed_listings": [
-        'http.title:"Index of /"{country}',
-    ],
-    "login_surfaces": [
-        'http.body:"xmlrpc.php"{country}',
-    ],
-    "injected_gambling": [
-        'http.title:"slot"{country}',
-        'http.body:"judi"{country}',
-    ],
-    "exposed_databases": [
-        'port:3306{country}',
-        'port:27017{country}',
-        'port:6379{country}',
-        'port:9200{country}',
-        'port:5432{country}',
-    ],
-    "unfinished_install": [
-        'http.body:"five-minute WordPress installation"{country}',
-    ],
-    "admin_panels": [
-        'http.title:"Adminer"{country}',
-        'http.title:"Webmin"{country}',
-    ],
-    "compromised_markers": [
-        'http.body:"IndoXploit"{country}',
-        'http.title:"WSO"{country}',
-    ],
-}
-
-# ---------------------------------------------------------------------------
-# Google unscoped dorks (NO site:). Supplementary engine.
-# ---------------------------------------------------------------------------
-GOOGLE_DORKS = {
-    "injected_gambling": [
-        'inurl:slot intitle:situs (gacor OR maxwin OR deposit)',
-        'intitle:(judi OR togel OR bandar) inurl:wp-content',
-        '카지노 inurl:wp-content',
-    ],
-    "exposed_files": [
-        'inurl:wp-config.php.bak',
-        'intitle:"index of" "wp-config.php"',
-        'ext:sql intext:wp_users',
-    ],
-    "login_surfaces": [
-        'inurl:wp-login.php intitle:"Log In"',
-        'inurl:xmlrpc.php intext:"XML-RPC server accepts POST requests only"',
-    ],
-    "unfinished_install": [
-        'inurl:wp-admin/install.php intitle:"WordPress"',
-        'inurl:wp-admin/setup-config.php',
-    ],
-    "admin_panels": [
-        'intitle:"Adminer" inurl:adminer',
-    ],
-    "compromised_markers": [
-        'intitle:"IndoXploit"',
-        'intitle:"WSO" inurl:.php',
-        'intext:"buy cialis" inurl:wp-content',
     ],
 }
 
@@ -303,8 +180,6 @@ def exploit_arg_error(args):
     if not args.mine:
         return ("--exploit requires --mine — only your cross-referenced hosts "
                 "are exploited, never the harvested pile")
-    if args.engine != "shodan":
-        return "--exploit is supported only with --engine shodan"
     if not os.path.exists(args.agent_path):
         return f"--agent-path not found: {args.agent_path}"
     return None
@@ -327,13 +202,6 @@ def registrable_match(host: str, mine: set) -> str:
         if host == m or host.endswith("." + m):
             return m
     return ""
-
-
-def domain_of(url: str) -> str:
-    try:
-        return urllib.parse.urlparse(url).hostname or ""
-    except Exception:
-        return ""
 
 
 def _valid_cidr(s: str) -> str:
@@ -388,23 +256,6 @@ def net_chunks(nets: list, size: int):
     size = max(1, size)
     for i in range(0, len(nets), size):
         yield nets[i:i + size]
-
-
-_HOST_RE = __import__("re").compile(r"^[a-z0-9]([a-z0-9\-]{0,62}\.)+[a-z]{2,63}$")
-
-
-def clean_host(s: str) -> str:
-    """Normalize a candidate hostname; return '' if it isn't one.
-
-    Strips cert-SAN wildcards ('*.') and rejects noise like ASN org names
-    ('AMAZON-02 - Amazon.com') that carry spaces or aren't valid domains.
-    """
-    if not isinstance(s, str):
-        return ""
-    h = s.strip().lower().lstrip("*.").rstrip(".")
-    if " " in h or "/" in h or not _HOST_RE.match(h):
-        return ""
-    return h
 
 
 # --------------------------- Shodan engine ---------------------------------
@@ -544,7 +395,7 @@ def run_shodan(args, mine: set, ts: str) -> None:
                   f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
             time.sleep(args.delay)
 
-    write_report(ts, "shodan", harvested, your_hits, raw, cross_ref=bool(mine))
+    write_report(ts, harvested, your_hits, raw, cross_ref=bool(mine))
 
     if getattr(args, "exploit", False):
         results = agent_bridge.run_exploitation(
@@ -554,272 +405,17 @@ def run_shodan(args, mine: set, ts: str) -> None:
             agent_bridge.write_exploit_report(ts, results)
 
 
-# --------------------------- Censys engine ---------------------------------
-
-def _collect_hosts(obj, ips: set, names: set) -> None:
-    """Recursively pull IPs and DNS names out of an arbitrary Censys hit object.
-
-    Defensive: the Platform response schema nests differently across resource
-    types, so we walk the whole structure rather than hardcode a path.
-    """
-    if isinstance(obj, dict):
-        for k, v in obj.items():
-            if k == "ip" and isinstance(v, str):
-                ips.add(v)
-            elif k in ("names", "dns_names", "reverse_dns_names") and isinstance(v, list):
-                names.update(c for x in v if (c := clean_host(x)))
-            elif k in ("name", "common_name", "dns", "host") and isinstance(v, str):
-                if (c := clean_host(v)):
-                    names.add(c)
-            else:
-                _collect_hosts(v, ips, names)
-    elif isinstance(obj, list):
-        for it in obj:
-            _collect_hosts(it, ips, names)
-
-
-def censys_search(query: str, pat: str, org: str, page_token: str) -> dict:
-    """One page of Censys Platform global search. Returns hits + next token."""
-    try:
-        body = {"query": query, "page_size": 100}
-        if page_token:
-            body["page_token"] = page_token
-        r = requests.post(
-            "https://api.platform.censys.io/v3/global/search/query",
-            headers={"Authorization": f"Bearer {pat}",
-                     "X-Organization-ID": org,
-                     "Content-Type": "application/json",
-                     "Accept": "application/json"},
-            json=body, timeout=45,
-        )
-        if r.status_code >= 400:
-            return {"hits": [], "next": None, "error": f"{r.status_code}: {r.text[:240]}"}
-        data = r.json()
-        # Defensive: hits may live under result.hits / result.matched_services / hits
-        result = data.get("result", data)
-        hits = (result.get("hits") or result.get("matched_services")
-                or result.get("resources") or [])
-        nxt = (result.get("next_page_token") or result.get("next_page")
-               or result.get("page_token"))
-        return {"hits": hits, "next": nxt, "error": None, "raw_keys": list(result.keys())}
-    except Exception as e:
-        return {"hits": [], "next": None, "error": f"{e.__class__.__name__}: {e}"}
-
-
-def run_censys(args, mine: set, ts: str) -> None:
-    pat = os.environ.get("CENSYS_PAT")
-    org = os.environ.get("CENSYS_ORG_ID") or args.org
-    if not pat:
-        sys.exit("CENSYS_PAT not set.  export CENSYS_PAT=...  (Platform Personal Access Token)")
-    if not org:
-        sys.exit("Organization ID required. export CENSYS_ORG_ID=... or pass --org "
-                 "(it's the UUID in your platform.censys.io URL).")
-
-    harvested = defaultdict(list)
-    your_hits, raw = [], []
-    country = f' and host.location.country_code="{args.country}"' if args.country else ""
-
-    queries = []
-    if args.query:                       # raw CenQL passthrough
-        queries.append(("custom", args.query))
-    if args.cn:                          # estate discovery by cert / dns name
-        queries.append(("estate_by_cert",
-                        f'host.services.tls.certificates.leaf_data.subject.common_name'
-                        f'="{args.cn}" or host.dns.names="{args.cn}"'))
-    if not args.query:
-        for cat, tmpls in CENSYS_DORKS.items():
-            if args.only and cat not in {c.strip() for c in args.only.split(",")}:
-                continue
-            for t in tmpls:
-                base = t.format(country=country)
-                for chunk in net_chunks(args.nets, args.net_batch):
-                    q = base
-                    if chunk:
-                        ors = " or ".join(f"host.ip: {n}" for n in chunk)
-                        q = f"{q} and ({ors})"
-                    queries.append((cat, q))
-
-    print(f"[*] {len(queries)} Censys query(ies) x up to {args.pages} page(s).\n")
-    for cat, q in queries:
-        token = ""
-        for p in range(args.pages):
-            res = censys_search(q, pat, org, token)
-            if res["error"]:
-                print(f"    [{cat}] p{p+1}: ERR {res['error']}")
-                break
-            if p == 0 and not res["hits"]:
-                print(f"    [{cat}] p1: 0 hits (response keys: {res.get('raw_keys')})")
-            for hit in res["hits"]:
-                ips, names = set(), set()
-                _collect_hosts(hit, ips, names)
-                ip = next(iter(ips), "")
-                for h in (names or {ip}):
-                    rec = {"category": cat, "query": q, "host": h, "ip": ip,
-                           "all_names": sorted(names)}
-                    raw.append(rec)
-                    harvested[h].append(rec)
-                    owned = mine.match(h, ip)
-                    if owned:
-                        rec["owned_domain"] = owned
-                        your_hits.append(rec)
-                        print(f"    [!!!] YOUR HOST SURFACED: {h} ({ip}) "
-                              f"owned:{owned} under [{cat}]")
-            print(f"    [{cat}] p{p+1}: {len(res['hits'])} hits "
-                  f"({len(harvested)} unique hosts so far)")
-            token = res["next"]
-            if not token:
-                break
-            time.sleep(args.delay)
-
-    write_report(ts, "censys", harvested, your_hits, raw, cross_ref=bool(mine))
-
-
-# --------------------------- Netlas engine ---------------------------------
-
-def netlas_search(query: str, key: str, start: int) -> dict:
-    """One page of Netlas /api/responses/ search (~20 results/page). Free tier."""
-    try:
-        r = requests.get(
-            "https://app.netlas.io/api/responses/",
-            params={"q": query, "start": start},
-            headers={"Authorization": f"Bearer {key}", "accept": "application/json"},
-            timeout=45,
-        )
-        if r.status_code == 429:
-            return {"items": [], "error": "rate_limited (60/min free tier)"}
-        if r.status_code == 402:
-            return {"items": [], "error": "402: out of free coins/quota"}
-        if r.status_code >= 400:
-            return {"items": [], "error": f"{r.status_code}: {r.text[:240]}"}
-        return {"items": r.json().get("items", []), "error": None}
-    except Exception as e:
-        return {"items": [], "error": f"{e.__class__.__name__}: {e}"}
-
-
-def run_netlas(args, mine: set, ts: str) -> None:
-    key = os.environ.get("NETLAS_API_KEY")
-    if not key:
-        sys.exit("NETLAS_API_KEY not set.  export NETLAS_API_KEY=...  "
-                 "(free key from app.netlas.io -> profile -> API key)")
-
-    harvested = defaultdict(list)
-    your_hits, raw = [], []
-    country = f' AND geo.country:{args.country}' if args.country else ""
-
-    queries = []
-    if args.query:
-        queries.append(("custom", args.query))
-    if args.cn:
-        # cert-field search is paywalled on Netlas free tier; host: wildcard is not.
-        # Plain wildcard is fast; the "OR host:apex" variant is ~25s and flaky, so skip it.
-        queries.append(("estate_by_host", f'host:*.{args.cn}'))
-    # Broad dork library runs only when NOT doing a focused --cn/--query check
-    if not args.query and not args.cn:
-        for cat, tmpls in NETLAS_DORKS.items():
-            if args.only and cat not in {c.strip() for c in args.only.split(",")}:
-                continue
-            for t in tmpls:
-                base = t.format(country=country)
-                for chunk in net_chunks(args.nets, args.net_batch):
-                    q = base
-                    if chunk:
-                        ors = " OR ".join(f'ip:"{n}"' for n in chunk)   # quote: Netlas 500s on bare CIDR
-                        q = f"{q} AND ({ors})"
-                    queries.append((cat, q))
-
-    print(f"[*] {len(queries)} Netlas query(ies) x up to {args.pages} page(s) "
-          f"(~20 results/page).\n")
-    for cat, q in queries:
-        for p in range(args.pages):
-            res = netlas_search(q, key, start=p * 20)
-            if res["error"]:
-                print(f"    [{cat}] p{p+1}: ERR {res['error']}")
-                break
-            if not res["items"]:
-                break
-            for item in res["items"]:
-                data = item.get("data", item)
-                ips, names = set(), set()
-                _collect_hosts(data, ips, names)
-                ip = data.get("ip") or next(iter(ips), "")
-                for h in (names or {ip}):
-                    rec = {"category": cat, "query": q, "host": h, "ip": ip,
-                           "all_names": sorted(names)}
-                    raw.append(rec)
-                    harvested[h].append(rec)
-                    owned = mine.match(h, ip)
-                    if owned:
-                        rec["owned_domain"] = owned
-                        your_hits.append(rec)
-                        print(f"    [!!!] YOUR HOST SURFACED: {h} ({ip}) "
-                              f"owned:{owned} under [{cat}]")
-            print(f"    [{cat}] p{p+1}: {len(res['items'])} results "
-                  f"({len(harvested)} unique hosts so far)")
-            time.sleep(max(args.delay, 1.0))   # stay under 60/min
-
-    write_report(ts, "netlas", harvested, your_hits, raw, cross_ref=bool(mine))
-
-
-# --------------------------- Google engine ---------------------------------
-
-def google_search_page(query: str, key: str, cx: str, start: int) -> dict:
-    try:
-        r = requests.get("https://www.googleapis.com/customsearch/v1",
-                         params={"key": key, "cx": cx, "q": query, "num": 10,
-                                 "start": start}, timeout=30)
-        if r.status_code == 429:
-            return {"items": [], "error": "rate_limited"}
-        r.raise_for_status()
-        return {"items": [{"title": i.get("title"), "link": i.get("link")}
-                          for i in r.json().get("items", [])], "error": None}
-    except Exception as e:
-        return {"items": [], "error": f"{e.__class__.__name__}: {e}"}
-
-
-def run_google(args, mine: set, ts: str) -> None:
-    key, cx = os.environ.get("GOOGLE_API_KEY"), os.environ.get("GOOGLE_CX")
-    if not (key and cx):
-        sys.exit("GOOGLE_API_KEY and GOOGLE_CX must be set (CX = entire-web search engine).")
-    harvested = defaultdict(list)
-    your_hits, raw = [], []
-    for cat, tmpls in GOOGLE_DORKS.items():
-        if args.only and cat not in {c.strip() for c in args.only.split(",")}:
-            continue
-        for q in tmpls:
-            for p in range(args.pages):
-                res = google_search_page(q, key, cx, 1 + p * 10)
-                if res["error"] == "rate_limited":
-                    print("[!] Google daily quota hit — stopping.")
-                    write_report(ts, "google", harvested, your_hits, raw, cross_ref=bool(mine))
-                    return
-                if res["error"]:
-                    print(f"    [{cat}]: err {res['error']}"); break
-                for it in res["items"]:
-                    h = domain_of(it["link"])
-                    rec = {"category": cat, "query": q, "host": h,
-                           "url": it["link"], "title": it["title"]}
-                    raw.append(rec); harvested[h].append(rec)
-                    owned = mine.match(h)
-                    if owned:
-                        rec["owned_domain"] = owned; your_hits.append(rec)
-                        print(f"    [!!!] YOUR DOMAIN SURFACED: {h} owned:{owned}")
-                print(f"    [{cat}] p{p+1}: {len(res['items'])} results "
-                      f"({len(harvested)} unique hosts)")
-                time.sleep(args.delay)
-    write_report(ts, "google", harvested, your_hits, raw, cross_ref=bool(mine))
-
-
 # --------------------------- shared report ---------------------------------
 
-def write_report(ts, engine, harvested, your_hits, raw, cross_ref=True) -> None:
+def write_report(ts, harvested, your_hits, raw, cross_ref=True) -> None:
     json_path, md_path = f"scan-{ts}.json", f"scan-{ts}.md"
     with open(json_path, "w") as f:
-        json.dump({"generated": ts, "engine": engine, "cross_ref": cross_ref,
+        json.dump({"generated": ts, "engine": "shodan", "cross_ref": cross_ref,
                    "your_hits": your_hits,
                    "harvested_hosts": sorted(harvested.keys()), "raw": raw},
                   f, indent=2, ensure_ascii=False)
     with open(md_path, "w") as f:
-        f.write(f"# Unscoped {engine} scan — {ts}\n\n")
+        f.write(f"# Unscoped shodan scan — {ts}\n\n")
         f.write(f"Unique hosts harvested: {len(harvested)}\n\n")
         if cross_ref:
             f.write("## 🚨 YOUR domains/hosts that surfaced in exposed results\n\n")
@@ -855,25 +451,21 @@ def write_report(ts, engine, harvested, your_hits, raw, cross_ref=True) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="Attacker's-eye internet-wide dork scan; flag your exposure.")
-    ap.add_argument("--engine", choices=["shodan", "google", "censys", "netlas"], default="netlas")
+    ap = argparse.ArgumentParser(description="Attacker's-eye internet-wide Shodan dork scan; flag your exposure.")
     ap.add_argument("--mine", help="optional file of YOUR domains and/or public CIDRs to flag "
                                     "in results; omit for a harvest-only run")
     ap.add_argument("--pages", type=int, default=2, help="result pages per query")
     ap.add_argument("--country", help="2-letter code to scope harvest (e.g. ID)")
     ap.add_argument("--net", help="scope the harvest to one or more public networks: a single "
                                   "CIDR, a comma-separated list, and/or a wordlist file "
-                                  "(e.g. 203.0.113.0/24,198.51.100.0/24 or ranges.txt). "
-                                  "shodan/censys/netlas only.")
+                                  "(e.g. 203.0.113.0/24,198.51.100.0/24 or ranges.txt).")
     ap.add_argument("--net-batch", type=int, default=10, dest="net_batch",
                     help="max CIDRs OR'd into a single query; larger --net lists are split "
                          "into this many per query (default 10; lower it if you hit "
                          "'Too many search filters')")
     ap.add_argument("--cn", help="find your own estate by TLS cert CN / DNS name (e.g. nzmweb.com)")
-    ap.add_argument("--org", help="Censys Organization ID (or set CENSYS_ORG_ID)")
-    ap.add_argument("--query", help="Censys: raw CenQL query passthrough (overrides the library)")
     ap.add_argument("--only", help="comma-separated categories to run")
-    ap.add_argument("--test", action="store_true", help="Shodan: validate key + show plan, then exit")
+    ap.add_argument("--test", action="store_true", help="validate key + show plan, then exit")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between API calls")
     ap.add_argument("--exploit", action="store_true",
                     help="after scan, hand YOUR surfaced hosts to pentest-agent (requires --mine)")
@@ -891,14 +483,11 @@ def main() -> None:
 
     args.nets = parse_nets(args.net) if args.net else []
     if args.nets:
-        if args.engine == "google":
-            print("[!] --net is ignored for the google engine (no IP-range filter).")
-        else:
-            print(f"[*] Scoping harvest to {len(args.nets)} network(s): {', '.join(args.nets)}")
-            if len(args.nets) > args.net_batch:
-                chunks = -(-len(args.nets) // args.net_batch)   # ceil div
-                print(f"[*] >{args.net_batch} networks: each dork is split into {chunks} "
-                      f"net-chunks — multiplies query count (mind API credits / daily limits).")
+        print(f"[*] Scoping harvest to {len(args.nets)} network(s): {', '.join(args.nets)}")
+        if len(args.nets) > args.net_batch:
+            chunks = -(-len(args.nets) // args.net_batch)   # ceil div
+            print(f"[*] >{args.net_batch} networks: each dork is split into {chunks} "
+                  f"net-chunks — multiplies query count (mind API credits / daily limits).")
 
     mine = load_mine(args.mine) if args.mine else Mine()
     if mine:
@@ -909,14 +498,7 @@ def main() -> None:
               "(results won't be cross-referenced against your assets).")
 
     ts = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
-    if args.engine == "shodan":
-        run_shodan(args, mine, ts)
-    elif args.engine == "censys":
-        run_censys(args, mine, ts)
-    elif args.engine == "netlas":
-        run_netlas(args, mine, ts)
-    else:
-        run_google(args, mine, ts)
+    run_shodan(args, mine, ts)
 
 
 if __name__ == "__main__":

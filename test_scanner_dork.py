@@ -1,10 +1,10 @@
-"""Structural invariants for scanner_dork's dork tables.
+"""Structural invariants for scanner_dork's Shodan dork table.
 
-We can't unit-test whether a Shodan/Censys/Netlas filter is *semantically* valid
-without spending query credits, but we CAN guarantee the tables are well-formed:
-every template is a non-empty string, country-scopable engines carry the
-{country} placeholder so --country actually filters, and the new categories the
-operator asked for are present on the primary (Shodan) engine.
+We can't unit-test whether a Shodan filter is *semantically* valid without
+spending query credits, but we CAN guarantee the table is well-formed: every
+template is a non-empty string, it carries the {country} placeholder so
+--country actually filters, and the new categories the operator asked for
+are present.
 """
 import importlib.util
 import pathlib
@@ -14,36 +14,27 @@ _spec = importlib.util.spec_from_file_location(
 scanner_dork = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scanner_dork)
 
-# engines that support host.location country scoping via {country}
-COUNTRY_ENGINES = {
-    "SHODAN_DORKS": scanner_dork.SHODAN_DORKS,
-    "CENSYS_DORKS": scanner_dork.CENSYS_DORKS,
-    "NETLAS_DORKS": scanner_dork.NETLAS_DORKS,
-}
 NEW_CATEGORIES = {
     "exposed_databases", "unfinished_install", "admin_panels", "compromised_markers",
 }
 
 
 def test_all_templates_are_nonempty_strings():
-    tables = dict(COUNTRY_ENGINES, GOOGLE_DORKS=scanner_dork.GOOGLE_DORKS)
-    for name, table in tables.items():
-        for cat, templates in table.items():
-            assert templates, f"{name}[{cat}] is empty"
-            for t in templates:
-                assert isinstance(t, str) and t.strip(), f"{name}[{cat}] bad template {t!r}"
+    for cat, templates in scanner_dork.SHODAN_DORKS.items():
+        assert templates, f"SHODAN_DORKS[{cat}] is empty"
+        for t in templates:
+            assert isinstance(t, str) and t.strip(), f"SHODAN_DORKS[{cat}] bad template {t!r}"
 
 
-def test_country_engines_carry_country_placeholder():
-    # Every country-engine template must format cleanly AND scope by country,
-    # otherwise --country ID silently scans the whole internet for that dork.
-    for name, table in COUNTRY_ENGINES.items():
-        for cat, templates in table.items():
-            for t in templates:
-                assert "{country}" in t, f"{name}[{cat}] missing {{country}}: {t!r}"
-                # must not blow up when filled or emptied
-                t.format(country='country:"ID"')
-                t.format(country="")
+def test_shodan_dorks_carry_country_placeholder():
+    # Every template must format cleanly AND scope by country, otherwise
+    # --country ID silently scans the whole internet for that dork.
+    for cat, templates in scanner_dork.SHODAN_DORKS.items():
+        for t in templates:
+            assert "{country}" in t, f"SHODAN_DORKS[{cat}] missing {{country}}: {t!r}"
+            # must not blow up when filled or emptied
+            t.format(country='country:"ID"')
+            t.format(country="")
 
 
 def test_new_categories_present_on_shodan():
@@ -81,7 +72,7 @@ import types
 
 
 def _args(**kw):
-    base = dict(exploit=False, mine=None, engine="shodan",
+    base = dict(exploit=False, mine=None,
                 agent_path="scanner_dork.py")  # a file that exists
     base.update(kw)
     return types.SimpleNamespace(**base)
@@ -90,12 +81,6 @@ def _args(**kw):
 def test_exploit_requires_mine():
     err = scanner_dork.exploit_arg_error(_args(exploit=True, mine=None))
     assert err and "--mine" in err
-
-
-def test_exploit_requires_shodan_engine():
-    err = scanner_dork.exploit_arg_error(
-        _args(exploit=True, mine="domains.txt", engine="netlas"))
-    assert err and "shodan" in err
 
 
 def test_exploit_missing_agent_path():
