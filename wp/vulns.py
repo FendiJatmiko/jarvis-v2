@@ -20,11 +20,21 @@ WORDFENCE_V3_PRODUCTION = "https://www.wordfence.com/api/intelligence/v3/vulnera
 # CWE ids whose exploitation yields code execution on the server → webshell-class.
 WEBSHELL_CWES = {"434", "94", "95", "96", "98", "78", "77", "502"}
 
-# CWE ids that grant an attacker admin access (privilege escalation / broken
-# auth / missing authorization). Not code-exec themselves, but the DOOR to a
-# webshell: unauth → admin → theme/plugin editor or plugin-upload → shell.
-# These are "webshell precursors" — Track B (phase_track_b) chains them.
-PRECURSOR_CWES = {"269", "862", "863", "284", "266", "287", "640", "620"}
+# CWE ids that, on their own, mean an attacker gains admin/account control —
+# privilege management (269/266), broken authentication (287), password
+# reset/change (640/620). Not code-exec themselves, but the DOOR to a webshell:
+# unauth → admin → theme/plugin editor or plugin-upload → shell. These are
+# reliable "webshell precursors" — Track B (phase_track_b) chains them.
+PRECURSOR_CWES = {"269", "266", "287", "640", "620"}
+
+# Broader authorization-gap CWEs. Missing/incorrect authorization (862/863) and
+# improper access control (284) cover privilege escalation AND pure
+# information-disclosure / IDOR (e.g. CVE-2026-1004 — an unauth WooCommerce
+# product-data leak, CVSS 5.3, no path to admin). The CWE alone can't tell those
+# apart, so — unlike PRECURSOR_CWES above — a weak-authz CWE counts as a webshell
+# precursor ONLY with a corroborating privesc signal in the title (_PRECURSOR_KW),
+# and never when the title self-identifies as an info leak (_INFO_DISCLOSURE_KW).
+WEAK_AUTHZ_CWES = {"862", "863", "284"}
 
 # Title keywords used when a record carries no/'unknown' CWE.
 _WEBSHELL_KW = [
@@ -42,6 +52,13 @@ _PRECURSOR_KW = [
     ("auth-bypass", ["authentication bypass", "auth bypass"]),
     ("acct-takeover", ["account takeover", "arbitrary password reset"]),
 ]
+
+# Title phrases that mark a finding as pure information disclosure. Under a
+# weak-authz CWE (862/863/284) this disqualifies it from the precursor tier —
+# it's a confidentiality leak, not a step toward admin/RCE.
+_INFO_DISCLOSURE_KW = ("information disclosure", "sensitive information",
+                       "information exposure", "info disclosure",
+                       "data exposure", "data disclosure")
 
 # On an open-registration WordPress, these roles are effectively "anyone" — a
 # privesc that needs only one of them is a real door. Higher roles already imply
@@ -100,15 +117,21 @@ def classify(cwe, title):
     # 3. Precursor (grants admin → webshell). In scope when it's a real entry
     #    point: unauthenticated, or authenticated needing only a low-priv role.
     if _precursor_reachable(t):
+        # Strong precursor CWEs imply account/role compromise on their own.
         if ids & {"287"}:
             return True, "auth-bypass"
         if ids & {"640"}:
             return True, "acct-takeover"
         if ids & PRECURSOR_CWES:
             return True, "privesc"
-        for klass, kws in _PRECURSOR_KW:
-            if any(k in t for k in kws):
-                return True, klass
+        # Weak-authz CWEs (862/863/284) are ambiguous, and a genuine privesc may
+        # also carry a CWE we don't list — so fall back to a title signal. But a
+        # title that self-identifies as info-disclosure is a confidentiality leak,
+        # not a webshell precursor: leave it out of scope (e.g. CVE-2026-1004).
+        if not any(k in t for k in _INFO_DISCLOSURE_KW):
+            for klass, kws in _PRECURSOR_KW:
+                if any(k in t for k in kws):
+                    return True, klass
     return False, "other"
 
 
