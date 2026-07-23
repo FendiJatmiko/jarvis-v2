@@ -1,6 +1,6 @@
 # Roadmap / Pick-up doc — pentest-agent (`freeln`)
 
-**Updated:** 2026-07-23 · **Repo:** `~/WORK/cs-ai/freeln` · **Branch:** `stag-01` · **Version:** `v0.23.0` (HEAD `f95a696`)
+**Updated:** 2026-07-23 · **Repo:** `~/WORK/cs-ai/freeln` · **Branch:** `stag-01` · **Version:** `v0.24.0`
 **This is the master pick-up doc. In-repo mirror of `~/roadmap.md` — either copy is authoritative; keep them in sync.**
 For the current in-flight sub-task (askgeorge SQLi cred crack) see `docs/HANDOFF-sqli-askgeorge.md` inside the repo.
 
@@ -24,8 +24,8 @@ git checkout stag-01
 python3.12 -m venv .venv                                # project is on Python 3.12
 source .venv/bin/activate
 pip install -r requirements.txt                         # just: requests>=2.25
-python3 -m pytest -q                                    # sanity: expect 270 passed
-python3 pentest-agent.py --version                      # -> pentest-agent 0.23.0
+python3 -m pytest -q                                    # sanity: expect 256 passed
+python3 pentest-agent.py --version                      # -> pentest-agent 0.24.0
 ```
 
 ### 0.2 SSH access to the lab host (`server-IOM`)
@@ -85,15 +85,17 @@ the user owns every target. Goal is *provable exploitability* to make a DevOps�
 
 ## 2. GROUND TRUTH (verified 2026-07-23)
 
-### 2.1 Recipe registry (`wp/recipes.py`)
+### 2.1 Recipe registry (`wp/recipes.py`) — 12 entries after the 2026-07-23 kirki+revslider removal
 - **RECIPES (Track A, unauth direct):** `wp-file-manager` (CVE-2020-25213), `wpdiscuz`
-  (CVE-2020-24186), `revslider` (CVE-2014-9735 — present but **UNPROVEN**, no confirmed shell),
-  `ninja-forms-uploads` (CVE-2026-0740), `simple-file-list` (CVE-2025-34085), `breeze`
-  (CVE-2026-3844), `king-addons` (CVE-2025-6327).
+  (CVE-2020-24186), `ninja-forms-uploads` (CVE-2026-0740), `simple-file-list` (CVE-2025-34085),
+  `breeze` (CVE-2026-3844), `king-addons` (CVE-2025-6327).
 - **PRIVESC_RECIPES (Track B, unauth → admin → plugin-zip shell):** `lastudio-element-kit`
-  (CVE-2026-0920), `kirki` (CVE-2026-8206), `opal-estate-pro` (CVE-2025-6934),
+  (CVE-2026-0920), `opal-estate-pro` (CVE-2025-6934),
   `essential-addons-for-elementor-lite` (CVE-2023-32243), `king-addons` (CVE-2025-6325).
 - **SQLI_RECIPES:** `wp-google-map-plugin` (CVE-2026-2580), `wp-automatic` (CVE-2024-27956).
+- **Removed 2026-07-23** (restorable from `docs/RECIPE-STATUS.md`): `kirki` (CVE-2026-8206 —
+  precondition-blocked) and `revslider` (CVE-2014-9735 — never landed). Their exclusive engine code
+  (kirki OOB `--oob-*` flags + `complete_reset_key`; revslider fingerprinting) was removed too.
 
 ### 2.2 Confirmed shells (real targets, live `id` in `~/.cache/pentest-agent/*.json`)
 | target | CVE / vector | plugin | track |

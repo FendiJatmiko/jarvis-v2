@@ -18,7 +18,7 @@ COMMON_SLUGS = [
     "litespeed-cache", "wp-super-cache", "w3-total-cache", "autoptimize", "wp-optimize",
     # page builders / themes stacks
     "colibri-page-builder", "colibri-page-builder-pro", "siteorigin-panels",
-    "beaver-builder-lite-version", "wpbakery", "revslider",
+    "beaver-builder-lite-version", "wpbakery",
     # forms / uploads (webshell-adjacent surface)
     "ninja-forms", "formidable", "wpforms", "everest-forms",
     "wp-file-manager", "filester", "wp-file-upload", "simple-file-list",

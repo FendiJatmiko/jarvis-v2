@@ -34,26 +34,6 @@ def _probe_plugin(http, base, slug):
     return None
 
 
-# RevSlider ships no readme.txt, so _probe_plugin can't version it — but WP
-# enqueues its assets with a ?rev=/?ver= query that IS the plugin version
-# (e.g. .../revslider/public/assets/css/rs6.css?ver=6.6.0, or the older
-# rs-plugin/css/settings.css?rev=4.6.5). That version gates the <=3.0.95 unauth
-# upload recipe so MATCH stops firing it blind on modern installs.
-_REVSLIDER_ASSET_VER = re.compile(
-    r"/wp-content/plugins/revslider/[^\"'?]+\?(?:rev|ver)=([\d.]+)")
-
-
-def _revslider_version(http, base, home):
-    m = _REVSLIDER_ASSET_VER.search(home or "")
-    if m:
-        return m.group(1)
-    # fallback: release_log.txt is world-readable on many installs; its first
-    # version-looking token is the current release.
-    _, log = _fetch(http, base + "/wp-content/plugins/revslider/release_log.txt")
-    lm = re.search(r"\d+\.\d+(?:\.\d+)?", log)
-    return lm.group(0) if lm else ""
-
-
 def _secondary_signals(http, base):
     """Confirm WordPress (and grab a version) from endpoints that survive even
     when the home page is broken/500. Returns (is_wp: bool, version: str|None)."""
@@ -114,13 +94,6 @@ def fingerprint(base_url, http, probe_slugs=None):
             # Referenced on the home page but readme not reachable — record
             # it best-effort so downstream still sees the plugin exists.
             plugins.append({"slug": slug, "version": ""})
-
-    # RevSlider has no readme.txt; recover its version from asset ?rev=/?ver=
-    # query strings (or release_log.txt) so MATCH can gate the version-specific
-    # unauth upload recipe instead of firing blind.
-    for p in plugins:
-        if p["slug"] == "revslider" and not p["version"]:
-            p["version"] = _revslider_version(http, base, home)
 
     # Robustness: finding a plugin's readme.txt proves /wp-content/plugins/ is
     # served → it IS WordPress, even if the home page 500s. And if the home was

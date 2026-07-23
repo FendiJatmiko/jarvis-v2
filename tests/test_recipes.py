@@ -42,19 +42,6 @@ def test_all_recipes_have_required_keys():
             assert "upload_path" in r, f"missing upload_path in {r.get('plugin')}"
 
 
-def test_kirki_oob_takeover_recipe_present():
-    recs = wp_recipes.find_privesc("kirki")
-    assert len(recs) == 1
-    r = recs[0]
-    assert r["cve"] == "CVE-2026-8206"
-    assert r["kind"] == "account-takeover-oob"
-    assert r["affected"] == ">=6.0.0,<=6.0.6"
-    assert r["endpoint"] == "/wp-json/KirkiComponentLibrary/v1/kirki-forgot-password"
-    assert r["user_param"] == "username" and r["email_param"] == "email"
-    assert r["success_marker"] == "Email sent"
-    assert r["source"] == "registry"
-
-
 def test_ninja_forms_uploads_recipe_present():
     recs = wp_recipes.find_recipes("ninja-forms-uploads")
     assert len(recs) == 1

