@@ -134,7 +134,7 @@ king.ofpweb.com` — and it self-upgrades to https.
 | cve-elementor | 8089 | ad-hoc experiment, no vuln plugin | — | ❌ not a real front |
 | cve-essaddons | 8090 | Essential Addons CVE-2023-32243 | kopirimba.xbrlink.com | ✅ shell |
 | cve-wpauto | 8091 | WP Automatic CVE-2024-27956 | scope3e.com | ❌ premium plugin not installed |
-| cve-breeze | 8092 | Breeze CVE-2026-3844 | www.lander.ofpweb.com | ❌ recipe unverified + gravatar-local setting OFF |
+| cve-breeze | 8092 | Breeze CVE-2026-3844 | www.lander.ofpweb.com | ⏳ ready to land: 2.4.4 vuln + gravatars-local ON + comments open; needs only a hosted callback payload. REAL farm forensic vector. |
 | cve-kingaddons | 8093 | King Addons CVE-2025-6327/6325 | **king.ofpweb.com** | ✅ shell (both tracks) |
 
 Torn down (older docs list them as running — they are NOT): revslider:8083, nfu:8084,

@@ -20,6 +20,13 @@ records *why* each hasn't landed and what it would take.
 | wpdiscuz | CVE-2020-24186 | RECIPES | georgeagent.com | Track-A comment-image upload |
 | king-addons | CVE-2025-6327 | RECIPES | king.ofpweb.com, :8093 | Track-A unauth upload |
 | king-addons | CVE-2025-6325 | PRIVESC | king.ofpweb.com, :8093 | Track-B register-role → admin → upload |
+| breeze | CVE-2026-3844 | RECIPES | **api.jefams.com** (cve-breeze:8092) | comment-avatar-ssrf → gravatars/*.php — **THE farm's real forensic vector**, landed 2026-07-23 |
+
+**Breeze landing — hard-won preconditions (all confirmed live 2026-07-23):**
+1. **Callback payload MUST be on port 80 / 443 / 8080.** WP's `download_url()` uses the SSRF-safe path (`wp_http_validate_url`), which rejects every other port — 8000/8099/9999 fail with `http_request_failed`. Serve it as a **static file** (not PHP-executed, or the VPS runs it and serves output instead of source). Correct byte content matters (`$_GET['c']` with quotes — unquoted fatals on PHP 8).
+2. **The comment author must land inside an avatar `<img alt=…>` on an anon page.** WP core's comment walker renders `get_avatar($comment)` with `alt=''` → NOT vulnerable by default. It needs a theme/widget that passes the comment author as the avatar `alt` (a common "recent commenters with avatars" pattern). On cve-breeze we added `wp-content/mu-plugins/commenter-avatars.php` to reproduce that rendering. **Real-farm exploitability depends on the farm theme doing this** — still worth confirming the farm's theme (Option B).
+3. **Breeze is a page-cache plugin** — the `get_avatar`/SSRF fetch only runs on a cache MISS. Purge `wp-content/cache/breeze/*` (or rely on the comment-post purge) before triggering.
+4. **Recipe `post_id` is hardcoded to 1**, but the only commentable post here was **id 10** (rebrand deleted Hello World). Changed locally to 10 for this run — the recipe really needs commentable-post discovery (hardcoded 1 breaks on most real sites).
 | essential-addons-for-elementor-lite | CVE-2023-32243 | PRIVESC | kopirimba.xbrlink.com, :8090 | Track-B unauth pw-reset → admin → upload |
 
 Note: king-addons is **one target, two CVEs** (both land) — that's why "5 entries / 4 landings".
@@ -42,9 +49,7 @@ Note: king-addons is **one target, two CVEs** (both land) — that's why "5 entr
   ComponentLibrary forgot-password page xbrlink.com doesn't have; only ever "worked" via a
   root-computed nonce cheat, and it's a pw-reset OOB, not a direct shell.
 
-| Recipe | CVE | Registry | Why it doesn't land · what would flip it |
-|--------|-----|----------|------------------------------------------|
-| breeze | CVE-2026-3844 | RECIPES | Recipe built (comment-avatar-ssrf mode) but **never verified**. Requires the non-default "Host Files Locally – Gravatars" setting ON + comments open; on cve-breeze:8092 the setting is OFF (no `breeze_*` options in DB). **To retry:** enable that setting + open comments on :8092, host a payload, run with `--callback-url`/`--callback-token`. |
+(breeze CVE-2026-3844 was here — now **PROVEN**, moved to the top table 2026-07-23.)
 
 ---
 
@@ -146,8 +151,8 @@ To fully restore kirki you'd re-add all of the above (the recipe alone won't run
 ## Tally (after the 2026-07-23 kirki + revslider removal)
 
 - **Registry now:** 12 recipe entries (RECIPES 6 · PRIVESC 4 · SQLI 2)
-- **Proven:** 5 CVE entries (4 targets) — unchanged
+- **Proven:** 6 CVE entries / 5 targets — **breeze CVE-2026-3844 landed 2026-07-23** (the farm's real forensic vector)
 - **Confirmed-vuln-not-shell:** 1 (gmap SQLi — active)
-- **Unproven still in registry:** 6 (breeze precondition-blocked · ninja-forms-uploads,
-  simple-file-list, lastudio-element-kit, opal-estate-pro, wp-automatic = built-not-fired)
+- **Unproven still in registry:** 5 built-not-fired (ninja-forms-uploads, simple-file-list,
+  lastudio-element-kit, opal-estate-pro, wp-automatic)
 - **Removed (restorable from appendix):** 2 (kirki, revslider)

@@ -118,7 +118,7 @@ RECIPES = [
         "endpoint": "/wp-comments-post.php",
         "params": {},
         "author_field": "author",
-        "post_id": 1,
+        "post_id": 10,
         "field": "author",
         "upload_path": "/wp-content/cache/breeze-extra/gravatars/{filename}",
         "source": "registry",
