@@ -1,0 +1,55 @@
+pentest-agent — REAL capability status (ground truth from run-state cache)
+==========================================================================
+Rule: only a populated confirmed[] with live `id` output counts as "working".
+A match/candidate, a timing delta, or an OOB signal is NOT a shell.
+Last reconciled: 2026-07-21 against ~/.cache/pentest-agent/*.json
+
+PROVEN WORKING — real webshell / RCE landed (id -> uid=33 www-data)
+------------------------------------------------------------------
+  target                       CVE / vector              plugin                 track
+  georgeagent.com              CVE-2020-24186            wpdiscuz               A (unauth upload)
+  xinference.nzmweb.com        CVE-2020-25213            wp-file-manager        A (unauth upload)
+  15.232.162.164 (AWS, off)    CVE-2020-25213            wp-file-manager        A (unauth upload)
+  localhost:8093               CVE-2025-6327 *           king-addons            A (unauth upload)
+  kopirimba.xbrlink.com        weak-cred -> plugin zip   essential-addons       B (admin login -> upload)
+  localhost:8090               weak-cred -> plugin zip   essential-addons       B (admin login -> upload)
+
+  * king-addons shell is real (cached) but its recipe is NOT in the current
+    registry (wp_recipes.RECIPES = wp-file-manager, wpdiscuz only). Toolkit
+    cannot reproduce this hit until the recipe is re-added.
+
+RECIPES CURRENTLY IN THE REGISTRY (wp_recipes.py)
+-------------------------------------------------
+  wp-file-manager   CVE-2020-25213   PROVEN (xinference, 15.232.x)
+  wpdiscuz          CVE-2020-24186   PROVEN (georgeagent)
+
+  privesc (Track B):
+  lastudio-element-kit  CVE-2026-0920  UNPROVEN — never landed; kept + relabeled
+                                       as the Track-B test fixture only. The
+                                       Track-B MECHANISM itself is proven (weak
+                                       -cred login -> plugin upload landed real
+                                       shells on kopirimba + localhost:8090).
+
+NOT A SHELL — real vuln, but no access/creds by default
+-------------------------------------------------------
+  askgeorgeai.com   CVE-2026-2580 (wp-google-map) time-based blind SQLi.
+                    Injection executes (control ~0.3s vs injected ~5.2s, 4x).
+                    Proves SQL runs; yields NO login, NO shell. To turn into
+                    something usable: run with --sqli-extract (pulls admin
+                    user_login, then password hash char-by-char -> crack offline).
+                    NOTE: the recipe's nopriv action is still a placeholder
+                    ("CONFIRM_nopriv_listing_action") in wp_recipes.py.
+
+CLEAN / NOTHING CONFIRMED
+-------------------------
+  scope3e.com          ran full pipeline, nothing confirmed
+  ofpweb.com           ran full pipeline, nothing confirmed
+  www.lander.ofpweb.com  CVE-2026-3844 matched as a CANDIDATE only — exploit
+                         did not verify. A candidate is a guess, not a landing.
+  xbrlink.com (root)   nothing confirmed
+
+REMOVED (theory without proof — do not cite as working)
+-------------------------------------------------------
+  RevSlider CVE-2014-9735   recipe + fingerprint detection deleted 2026-07-21.
+                            Never landed on any target. Was described as
+                            "landed" in error; it never was.
