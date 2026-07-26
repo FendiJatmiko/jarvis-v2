@@ -1,0 +1,17 @@
+# Aider project config for freeln / pentest-agent.
+# Auto-loaded whenever you run `aider` from this repo root — no flags needed.
+
+# Local model (offline-friendly). Switch to :14b for harder reasoning tasks.
+model: ollama/qwen2.5-coder:7b
+
+# Always load the project handoff read-only, so every session starts with the
+# architecture, invariants, and current task already in context.
+read: AIDER-HANDOFF.md
+
+# Repo-map: Aider summarizes the whole codebase (function/class signatures) and
+# feeds a token-budgeted slice to the model. Keep this modest on an 8 GB card so
+# the map doesn't crowd out the files you're actually editing.
+map-tokens: 1024
+
+# Don't auto-add every dirty file to the chat; you control context with /add.
+# (Aider still auto-commits its own edits to git — use /undo to revert.)
