@@ -56,6 +56,8 @@ import requests
 
 import agent_bridge
 
+__version__ = "0.14.0"
+
 # ---------------------------------------------------------------------------
 # Shodan queries — Shodan filter syntax (NOT Google dork syntax).
 # These surface exposed/vulnerable hosts internet-wide, as an attacker harvests.
@@ -452,6 +454,8 @@ def write_report(ts, harvested, your_hits, raw, cross_ref=True) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description="Attacker's-eye internet-wide Shodan dork scan; flag your exposure.")
+    ap.add_argument("--version", action="version",
+                    version=f"%(prog)s {__version__}")
     ap.add_argument("--mine", help="optional file of YOUR domains and/or public CIDRs to flag "
                                     "in results; omit for a harvest-only run")
     ap.add_argument("--pages", type=int, default=2, help="result pages per query")
