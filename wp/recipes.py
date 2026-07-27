@@ -212,7 +212,7 @@ RECIPES = [
                 "131K+ attacks recorded since discovery.",
     },
     {
-        "plugin": "wpvivid-backup-migration",
+        "plugin": "wpvivid-backuprestore",
         "cve": "CVE-2026-1357",
         "affected": "<=0.9.123",
         "mode": "wpvivid-encrypted-upload",
