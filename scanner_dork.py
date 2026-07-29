@@ -19,8 +19,11 @@ Usage:
   # Validate your Shodan key + see plan / remaining query credits (free, no credits used):
   python3 scanner_dork.py --test
 
-  # Harvest internet-wide WordPress/exposed hosts and flag your own domains:
+  # Scan for hardcoded CVE-vulnerable WordPress plugins + exposed infrastructure on your domains:
   python3 scanner_dork.py --mine domains.txt
+
+  # Same, but quiet mode (suppresses line-by-line output):
+  python3 scanner_dork.py --mine domains.txt --quiet
 
   # Scope the harvest to a country to save credits + raise the odds your sites appear:
   python3 scanner_dork.py --mine domains.txt --country ID
@@ -30,12 +33,6 @@ Usage:
 
   # Discover YOUR OWN estate via your TLS cert (great for a subdomain farm):
   python3 scanner_dork.py --mine domains.txt --cn nzmweb.com
-
-  # Hunt for instances of software vulnerable to specific CVEs (e.g. WordPress plugins):
-  python3 scanner_dork.py --mine domains.txt --vuln cves.txt
-
-  # Same, but faster via --quiet (suppresses line-by-line output):
-  python3 scanner_dork.py --mine domains.txt --vuln cves.txt --quiet
 
 The --mine file may mix domains and public IP ranges, one per line:
       example.com
@@ -53,7 +50,6 @@ import argparse
 import ipaddress
 import json
 import os
-import re
 import sys
 import time
 from collections import defaultdict
@@ -63,13 +59,108 @@ import requests
 
 import agent_bridge
 
-__version__ = "0.15.0"
+__version__ = "0.16.0"
 
 # ---------------------------------------------------------------------------
 # Shodan queries — Shodan filter syntax (NOT Google dork syntax).
 # These surface exposed/vulnerable hosts internet-wide, as an attacker harvests.
 # {country} is filled in when --country is passed, else removed.
 # ---------------------------------------------------------------------------
+# Hardcoded CVE signatures for compromised farm research
+# Each CVE includes specific Shodan queries to detect vulnerable instances
+VULNERABLE_CVES = {
+    "CVE-2020-24186": {
+        "name": "wpDiscuz File Upload RCE",
+        "product": "wpDiscuz 7.0-7.0.4",
+        "type": "Unauthenticated RCE via unrestricted file upload",
+        "queries": [
+            'http.html:"wmuUploadFiles" http.component:"WordPress" {country}',
+            'http.html:"/wp-content/plugins/wpdiscuz/" {country}',
+            'http.title:"wpDiscuz" http.component:"WordPress" {country}',
+        ]
+    },
+    "CVE-2023-32243": {
+        "name": "Essential Addons Auth Bypass",
+        "product": "Essential Addons for Elementor 5.4.0-5.7.1",
+        "type": "Unauthenticated password reset / privilege escalation",
+        "queries": [
+            'http.html:"essential-addons-for-elementor" {country}',
+            'http.html:"reset_password" http.component:"WordPress" {country}',
+            'http.component:"Essential Addons" http.component:"WordPress" {country}',
+        ]
+    },
+    "CVE-2024-25600": {
+        "name": "Bricks Builder REST API RCE",
+        "product": "Bricks Builder Theme up to 1.9.6",
+        "type": "Unauthenticated PHP code execution via REST API",
+        "queries": [
+            'http.html:"/wp-json/bricks/v1/render_element" {country}',
+            'http.html:"render_element" http.component:"WordPress" {country}',
+            'http.html:"Bricks Builder" {country}',
+        ]
+    },
+    "CVE-2025-6389": {
+        "name": "Sneeit Framework AJAX RCE",
+        "product": "Sneeit Framework up to 8.3",
+        "type": "Unauthenticated arbitrary code execution via call_user_func",
+        "queries": [
+            'http.html:"sneeit_articles_pagination" {country}',
+            'http.html:"/wp-content/plugins/sneeit-framework/" {country}',
+            'http.html:"action=sneeit_articles_pagination" {country}',
+        ]
+    },
+    "CVE-2025-7384": {
+        "name": "Contact Form 7 DB Deserialization RCE",
+        "product": "Database for CF7/WPForms up to 1.4.3",
+        "type": "Insecure unserialize() leading to RCE via POP chain",
+        "queries": [
+            'http.html:"database-db-manager-for-contact-form-7" {country}',
+            'http.html:"get_lead_detail" http.component:"WordPress" {country}',
+            'http.html:"Contact Form 7" http.html:"form submission" {country}',
+        ]
+    },
+    "CVE-2026-3844": {
+        "name": "Breeze Cache Gravatar Upload RCE",
+        "product": "Breeze Cache 2.x up to 2.4.4",
+        "type": "Arbitrary file upload via Gravatar fetching",
+        "queries": [
+            'http.html:"Breeze" http.html:"Cache" http.component:"WordPress" {country}',
+            'http.html:"/wp-content/plugins/breeze/" {country}',
+            'http.html:"fetch_gravatar_from_remote" {country}',
+        ]
+    },
+    "CVE-2026-1357": {
+        "name": "WPvivid Backup Path Traversal RCE",
+        "product": "WPvivid Backup & Migration up to 0.9.123",
+        "type": "Arbitrary file upload via path traversal in backup transfer",
+        "queries": [
+            'http.html:"wpvivid" http.html:"action=send_to_site" {country}',
+            'http.html:"/wp-content/plugins/wpvivid-backup-migration/" {country}',
+            'http.html:"wpvivid_action" http.component:"WordPress" {country}',
+        ]
+    },
+    "CVE-2026-63030": {
+        "name": "WordPress Core REST API Batch RCE (wp2shell)",
+        "product": "WordPress 6.9.0-6.9.4, 7.0.0-7.0.1",
+        "type": "Logic flaw in batch API route handling (part of wp2shell chain)",
+        "queries": [
+            'http.html:"/wp-json/batch/v1" {country}',
+            'http.header:"X-WP-Version: 6.9" {country}',
+            'http.html:"wp-json" http.component:"WordPress" {country}',
+        ]
+    },
+    "CVE-2026-2580": {
+        "name": "WP Maps Store Locator SQLi",
+        "product": "WP Maps Store Locator up to 4.9.1",
+        "type": "Time-based SQL injection via orderby parameter",
+        "queries": [
+            'http.html:"wp-maps-store-locator" {country}',
+            'http.html:"orderby" http.html:"maps" http.component:"WordPress" {country}',
+            'http.html:"/wp-content/plugins/wp-maps-store-locator-google-maps/" {country}',
+        ]
+    },
+}
+
 SHODAN_DORKS = {
     "wordpress_hosts": [
         'http.component:"WordPress" {country}',
@@ -202,131 +293,6 @@ def load_mine(path: str) -> Mine:
     return mine
 
 
-# ----------- CVE-based detection (research: attacker's vulnerability angle) --------
-
-def load_cves(path: str) -> list:
-    """Load CVE IDs from a file (one per line, # comments allowed)."""
-    cves = []
-    with open(path) as f:
-        for line in f:
-            line = line.strip().split("#")[0].strip()
-            if line:
-                cves.append(line.upper())
-    return cves
-
-
-def fetch_cve_info(cve_id: str) -> dict:
-    """Fetch CVE details from NVD API. Returns {products: [...], versions: {...}, ...}."""
-    try:
-        url = f"https://services.nvd.nist.gov/rest/json/cves/2.0"
-        params = {"keywordSearch": cve_id}
-        r = requests.get(url, params=params, timeout=10)
-        r.raise_for_status()
-        data = r.json()
-        if not data.get("vulnerabilities"):
-            return {"error": f"not found in NVD", "products": [], "versions": {}}
-        vuln = data["vulnerabilities"][0].get("cve", {})
-        cve_data = {
-            "id": cve_id,
-            "description": (vuln.get("descriptions") or [{}])[0].get("value", ""),
-            "cvss": vuln.get("metrics", {}).get("cvssV3_1", {}).get("cvssData", {}).get("baseScore", ""),
-            "products": [],
-            "versions": {},
-        }
-        # Parse affected products/versions from weaknesses/configurations
-        for conf in (vuln.get("configurations") or []):
-            for node in conf.get("nodes", []):
-                for cpe_match in node.get("cpeMatch", []):
-                    cpe = cpe_match.get("criteria", "")
-                    if cpe:
-                        parts = cpe.split(":")
-                        if len(parts) >= 5:
-                            vendor = parts[3]
-                            product = parts[4]
-                            version = parts[5] if len(parts) > 5 else "*"
-                            key = f"{vendor}/{product}"
-                            if key not in cve_data["products"]:
-                                cve_data["products"].append(key)
-                            if key not in cve_data["versions"]:
-                                cve_data["versions"][key] = []
-                            if version not in cve_data["versions"][key]:
-                                cve_data["versions"][key].append(version)
-        return cve_data
-    except Exception as e:
-        return {"error": str(e), "products": [], "versions": {}}
-
-
-def cve_to_shodan_queries(cve_info: dict, quiet: bool = False) -> list:
-    """Convert CVE data into Shodan queries for fingerprinting vulnerable software.
-
-    Strategy: search for the affected product/version combinations visible in HTTP
-    responses (banners, titles, footers, etc.). Examples:
-      - WordPress plugins (http.html:"plugin-name" http.component:"WordPress")
-      - Web servers (product:"Apache" version:"2.4.x")
-      - CMS/panels (http.title:"...")
-    """
-    queries = []
-    cve_id = cve_info.get("id", "")
-    products = cve_info.get("products", [])
-    versions = cve_info.get("versions", {})
-
-    if cve_info.get("error"):
-        if not quiet:
-            print(f"    [CVE] {cve_id}: {cve_info['error']}")
-        return []
-
-    desc = cve_info.get("description", "").lower()
-
-    # Build queries for each affected product
-    for product_key in products:
-        vendor, prod = product_key.split("/", 1)
-        prod_lower = prod.lower()
-        vers = versions.get(product_key, [])
-
-        # Heuristic fingerprints based on product type
-        # WordPress plugins are the most common attack vector in gambling farm compromises
-        if "wordpress" in prod_lower or "plugin" in desc:
-            # Look for the plugin in HTTP responses + WordPress indicator
-            for v in vers[:3]:  # Limit to first 3 versions per query
-                if v != "*":
-                    q = f'http.html:"{prod}" http.component:"WordPress" {cve_id}'
-                else:
-                    q = f'http.html:"{prod}" http.component:"WordPress"'
-                queries.append(("cve_" + cve_id, q))
-
-        # Apache, Nginx, IIS banners
-        elif prod_lower in ("apache", "nginx", "iis"):
-            if vers and vers[0] != "*":
-                q = f'product:"{prod}" version:"{vers[0]}" {cve_id}'
-            else:
-                q = f'product:"{prod}" {cve_id}'
-            queries.append(("cve_" + cve_id, q))
-
-        # PHP, Node.js, Python web frameworks
-        elif prod_lower in ("php", "nodejs", "node.js", "python", "java"):
-            if vers and vers[0] != "*":
-                q = f'http.component:"{prod}" version:"{vers[0]}" {cve_id}'
-            else:
-                q = f'http.component:"{prod}" {cve_id}'
-            queries.append(("cve_" + cve_id, q))
-
-        # Database systems
-        elif prod_lower in ("mysql", "postgresql", "mongodb", "redis", "elasticsearch"):
-            if vers and vers[0] != "*":
-                q = f'product:"{prod}" version:"{vers[0]}" {cve_id}'
-            else:
-                q = f'product:"{prod}" {cve_id}'
-            queries.append(("cve_" + cve_id, q))
-
-        # Generic: search for product name in HTML + CVE ID
-        else:
-            q = f'http.html:"{prod}" {cve_id}'
-            queries.append(("cve_" + cve_id, q))
-
-    if not quiet and queries:
-        print(f"    [CVE] {cve_id}: {len(queries)} query(ies) from {len(products)} product(s)")
-
-    return queries
 
 
 def registrable_match(host: str, mine: set) -> str:
@@ -398,18 +364,14 @@ def build_queries(args, country: str) -> list:
     """Assemble the [(category, shodan_query)] list for this run.
 
     Modes:
-      * default   — the whole SHODAN_DORKS catalog (optionally narrowed by --only)
-      * --query   — ONE raw passthrough filter tagged "custom", replacing the
-                    catalog so a specific fingerprint/CVE test doesn't burn a
-                    query credit on every category.
-      * --vuln    — CVE-based detection: fetch CVE details from NVD, extract
-                    affected products, build fingerprint queries to find instances
+      * default   — hardcoded CVE vulnerability queries + optional SHODAN_DORKS catalog
+      * --query   — ONE raw passthrough filter tagged "custom", replacing everything
+
     --cn estate discovery runs first in either mode; --country and --net scoping
     compose onto every query the same way.
     """
     nets = getattr(args, "nets", []) or []
     net_batch = getattr(args, "net_batch", 10)
-    quiet = getattr(args, "quiet", False)
 
     def scoped(base: str):
         base = base.strip()
@@ -421,25 +383,6 @@ def build_queries(args, country: str) -> list:
         # Estate-discovery: find YOUR OWN hosts via your TLS cert CN
         queries.append(("estate_by_cert", f'ssl.cert.subject.cn:"{args.cn}"'))
 
-    # CVE-based detection: replaces the dork catalog if provided
-    vuln = getattr(args, "vuln", None)
-    if vuln:
-        if not quiet:
-            print(f"[*] Loading CVEs from {vuln}...")
-        cve_ids = load_cves(vuln)
-        if not quiet:
-            print(f"[*] Fetching NVD data for {len(cve_ids)} CVE(s)...")
-        for cve_id in cve_ids:
-            time.sleep(0.1)  # Be nice to NVD API
-            cve_info = fetch_cve_info(cve_id)
-            cve_queries = cve_to_shodan_queries(cve_info, quiet=quiet)
-            for cat, q_base in cve_queries:
-                for q in scoped(q_base.format(country=country)):
-                    queries.append((cat, q))
-        if not queries:
-            print("[!] No CVE-based queries generated. Check your CVE list and try again.")
-        return queries
-
     raw = getattr(args, "query", None)
     if raw:
         base = f"{raw.strip()} {country}".strip()
@@ -447,6 +390,13 @@ def build_queries(args, country: str) -> list:
             queries.append(("custom", q))
         return queries
 
+    # Always run hardcoded CVE vulnerability queries (from compromised farm research)
+    for cve_id, cve_info in VULNERABLE_CVES.items():
+        for query_template in cve_info.get("queries", []):
+            for q in scoped(query_template.format(country=country)):
+                queries.append((cve_id, q))
+
+    # Also run standard dorks unless --only is filtering them
     for cat, tmpls in SHODAN_DORKS.items():
         if args.only and cat not in {c.strip() for c in args.only.split(",")}:
             continue
@@ -665,9 +615,6 @@ def main() -> None:
                     "--query 'http.html:\"revslider\" vuln:CVE-2015-5151'. "
                     "--country/--net/--cn still compose; --only is ignored. "
                     "(vuln: needs a Shodan tier that includes the vuln filter.)")
-    ap.add_argument("--vuln", help="CVE-based detection: file of CVE IDs (one per line, e.g. "
-                    "CVE-2024-1234). Fetches NVD data, extracts affected products, and builds "
-                    "Shodan queries to find vulnerable instances. Replaces the built-in dorks.")
     ap.add_argument("--only", help="comma-separated categories to run")
     ap.add_argument("--quiet", action="store_true", help="suppress line-by-line output during scan")
     ap.add_argument("--test", action="store_true", help="validate key + show plan, then exit")

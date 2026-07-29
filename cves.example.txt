@@ -1,7 +1,0 @@
-# Example CVE list for scanning
-# One CVE ID per line, # for comments
-CVE-2023-46805
-CVE-2023-37989
-CVE-2023-27997
-CVE-2023-24987
-CVE-2024-21887
