@@ -260,6 +260,46 @@ def net_chunks(nets: list, size: int):
         yield nets[i:i + size]
 
 
+def build_queries(args, country: str) -> list:
+    """Assemble the [(category, shodan_query)] list for this run.
+
+    Modes:
+      * default   — the whole SHODAN_DORKS catalog (optionally narrowed by --only)
+      * --query   — ONE raw passthrough filter tagged "custom", replacing the
+                    catalog so a specific fingerprint/CVE test doesn't burn a
+                    query credit on every category.
+    --cn estate discovery runs first in either mode; --country and --net scoping
+    compose onto every query the same way.
+    """
+    nets = getattr(args, "nets", []) or []
+    net_batch = getattr(args, "net_batch", 10)
+
+    def scoped(base: str):
+        base = base.strip()
+        for chunk in net_chunks(nets, net_batch):
+            yield f"{base} net:{','.join(chunk)}".strip() if chunk else base
+
+    queries = []
+    if args.cn:
+        # Estate-discovery: find YOUR OWN hosts via your TLS cert CN
+        queries.append(("estate_by_cert", f'ssl.cert.subject.cn:"{args.cn}"'))
+
+    raw = getattr(args, "query", None)
+    if raw:
+        base = f"{raw.strip()} {country}".strip()
+        for q in scoped(base):
+            queries.append(("custom", q))
+        return queries
+
+    for cat, tmpls in SHODAN_DORKS.items():
+        if args.only and cat not in {c.strip() for c in args.only.split(",")}:
+            continue
+        for t in tmpls:
+            for q in scoped(t.format(country=country)):
+                queries.append((cat, q))
+    return queries
+
+
 # --------------------------- Shodan engine ---------------------------------
 
 def _http_url(host: str, port, is_tls: bool) -> str:
@@ -342,19 +382,8 @@ def run_shodan(args, mine: set, ts: str) -> None:
     your_hits, raw = [], []
     country = f'country:"{args.country}"' if args.country else ""
 
-    # Build the query set
-    queries = []
-    if args.cn:
-        # Estate-discovery: find YOUR OWN hosts via your TLS cert CN
-        queries.append(("estate_by_cert", f'ssl.cert.subject.cn:"{args.cn}"'))
-    for cat, tmpls in SHODAN_DORKS.items():
-        if args.only and cat not in {c.strip() for c in args.only.split(",")}:
-            continue
-        for t in tmpls:
-            base = t.format(country=country).strip()
-            for chunk in net_chunks(args.nets, args.net_batch):
-                q = f"{base} net:{','.join(chunk)}".strip() if chunk else base
-                queries.append((cat, q))
+    # Build the query set (raw --query overrides the dork catalog)
+    queries = build_queries(args, country)
 
     print(f"[*] {len(queries)} query(ies) x up to {args.pages} page(s). "
           f"Each page = 1 query credit.\n")
@@ -468,6 +497,11 @@ def main() -> None:
                          "into this many per query (default 10; lower it if you hit "
                          "'Too many search filters')")
     ap.add_argument("--cn", help="find your own estate by TLS cert CN / DNS name (e.g. nzmweb.com)")
+    ap.add_argument("--query", help="raw Shodan filter passthrough — run this ONE query "
+                    "INSTEAD of the built-in dork catalog, e.g. "
+                    "--query 'http.html:\"revslider\" vuln:CVE-2015-5151'. "
+                    "--country/--net/--cn still compose; --only is ignored. "
+                    "(vuln: needs a Shodan tier that includes the vuln filter.)")
     ap.add_argument("--only", help="comma-separated categories to run")
     ap.add_argument("--test", action="store_true", help="validate key + show plan, then exit")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between API calls")

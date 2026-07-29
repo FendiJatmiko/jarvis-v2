@@ -127,3 +127,54 @@ def test_hint_label_builds_bracket():
 
 def test_hint_label_empty_when_nothing():
     assert scanner_dork.hint_label({"product": "", "version": "", "cves": []}) == ""
+
+
+# --- --query raw passthrough / build_queries ------------------------------
+def _qargs(**kw):
+    base = dict(query=None, cn=None, only=None, nets=[], net_batch=10)
+    base.update(kw)
+    return types.SimpleNamespace(**base)
+
+
+def test_build_queries_default_runs_full_catalog():
+    qs = scanner_dork.build_queries(_qargs(), country="")
+    cats = {c for c, _ in qs}
+    assert cats == set(scanner_dork.SHODAN_DORKS)   # every dork category, nothing else
+    assert "custom" not in cats
+
+
+def test_build_queries_only_filters_catalog():
+    qs = scanner_dork.build_queries(_qargs(only="exposed_databases"), country="")
+    assert {c for c, _ in qs} == {"exposed_databases"}
+
+
+def test_build_queries_raw_overrides_catalog():
+    # --query replaces the whole catalog with ONE custom query (don't burn
+    # credits on every category when the operator asked for a specific one).
+    qs = scanner_dork.build_queries(_qargs(query='http.html:"revslider"'), country="")
+    assert [c for c, _ in qs] == ["custom"]
+    assert qs[0][1] == 'http.html:"revslider"'
+
+
+def test_build_queries_raw_appends_country():
+    qs = scanner_dork.build_queries(
+        _qargs(query="vuln:CVE-2015-5151"), country='country:"ID"')
+    assert len(qs) == 1
+    cat, q = qs[0]
+    assert cat == "custom"
+    assert q == 'vuln:CVE-2015-5151 country:"ID"'
+
+
+def test_build_queries_raw_still_composes_net_scope():
+    qs = scanner_dork.build_queries(
+        _qargs(query='product:"MySQL"', nets=["203.0.113.0/24"], net_batch=10),
+        country="")
+    assert len(qs) == 1
+    assert qs[0][1] == 'product:"MySQL" net:203.0.113.0/24'
+
+
+def test_build_queries_cn_runs_alongside_raw():
+    # estate discovery (--cn) is orthogonal and still runs before the custom query
+    qs = scanner_dork.build_queries(
+        _qargs(query="vuln:CVE-1", cn="nzmweb.com"), country="")
+    assert [c for c, _ in qs] == ["estate_by_cert", "custom"]
