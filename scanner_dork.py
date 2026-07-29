@@ -31,6 +31,12 @@ Usage:
   # Discover YOUR OWN estate via your TLS cert (great for a subdomain farm):
   python3 scanner_dork.py --mine domains.txt --cn nzmweb.com
 
+  # Hunt for instances of software vulnerable to specific CVEs (e.g. WordPress plugins):
+  python3 scanner_dork.py --mine domains.txt --vuln cves.txt
+
+  # Same, but faster via --quiet (suppresses line-by-line output):
+  python3 scanner_dork.py --mine domains.txt --vuln cves.txt --quiet
+
 The --mine file may mix domains and public IP ranges, one per line:
       example.com
       www.example.com
@@ -47,6 +53,7 @@ import argparse
 import ipaddress
 import json
 import os
+import re
 import sys
 import time
 from collections import defaultdict
@@ -56,7 +63,7 @@ import requests
 
 import agent_bridge
 
-__version__ = "0.14.0"
+__version__ = "0.15.0"
 
 # ---------------------------------------------------------------------------
 # Shodan queries — Shodan filter syntax (NOT Google dork syntax).
@@ -195,6 +202,133 @@ def load_mine(path: str) -> Mine:
     return mine
 
 
+# ----------- CVE-based detection (research: attacker's vulnerability angle) --------
+
+def load_cves(path: str) -> list:
+    """Load CVE IDs from a file (one per line, # comments allowed)."""
+    cves = []
+    with open(path) as f:
+        for line in f:
+            line = line.strip().split("#")[0].strip()
+            if line:
+                cves.append(line.upper())
+    return cves
+
+
+def fetch_cve_info(cve_id: str) -> dict:
+    """Fetch CVE details from NVD API. Returns {products: [...], versions: {...}, ...}."""
+    try:
+        url = f"https://services.nvd.nist.gov/rest/json/cves/2.0"
+        params = {"keywordSearch": cve_id}
+        r = requests.get(url, params=params, timeout=10)
+        r.raise_for_status()
+        data = r.json()
+        if not data.get("vulnerabilities"):
+            return {"error": f"not found in NVD", "products": [], "versions": {}}
+        vuln = data["vulnerabilities"][0].get("cve", {})
+        cve_data = {
+            "id": cve_id,
+            "description": (vuln.get("descriptions") or [{}])[0].get("value", ""),
+            "cvss": vuln.get("metrics", {}).get("cvssV3_1", {}).get("cvssData", {}).get("baseScore", ""),
+            "products": [],
+            "versions": {},
+        }
+        # Parse affected products/versions from weaknesses/configurations
+        for conf in (vuln.get("configurations") or []):
+            for node in conf.get("nodes", []):
+                for cpe_match in node.get("cpeMatch", []):
+                    cpe = cpe_match.get("criteria", "")
+                    if cpe:
+                        parts = cpe.split(":")
+                        if len(parts) >= 5:
+                            vendor = parts[3]
+                            product = parts[4]
+                            version = parts[5] if len(parts) > 5 else "*"
+                            key = f"{vendor}/{product}"
+                            if key not in cve_data["products"]:
+                                cve_data["products"].append(key)
+                            if key not in cve_data["versions"]:
+                                cve_data["versions"][key] = []
+                            if version not in cve_data["versions"][key]:
+                                cve_data["versions"][key].append(version)
+        return cve_data
+    except Exception as e:
+        return {"error": str(e), "products": [], "versions": {}}
+
+
+def cve_to_shodan_queries(cve_info: dict, quiet: bool = False) -> list:
+    """Convert CVE data into Shodan queries for fingerprinting vulnerable software.
+
+    Strategy: search for the affected product/version combinations visible in HTTP
+    responses (banners, titles, footers, etc.). Examples:
+      - WordPress plugins (http.html:"plugin-name" http.component:"WordPress")
+      - Web servers (product:"Apache" version:"2.4.x")
+      - CMS/panels (http.title:"...")
+    """
+    queries = []
+    cve_id = cve_info.get("id", "")
+    products = cve_info.get("products", [])
+    versions = cve_info.get("versions", {})
+
+    if cve_info.get("error"):
+        if not quiet:
+            print(f"    [CVE] {cve_id}: {cve_info['error']}")
+        return []
+
+    desc = cve_info.get("description", "").lower()
+
+    # Build queries for each affected product
+    for product_key in products:
+        vendor, prod = product_key.split("/", 1)
+        prod_lower = prod.lower()
+        vers = versions.get(product_key, [])
+
+        # Heuristic fingerprints based on product type
+        # WordPress plugins are the most common attack vector in gambling farm compromises
+        if "wordpress" in prod_lower or "plugin" in desc:
+            # Look for the plugin in HTTP responses + WordPress indicator
+            for v in vers[:3]:  # Limit to first 3 versions per query
+                if v != "*":
+                    q = f'http.html:"{prod}" http.component:"WordPress" {cve_id}'
+                else:
+                    q = f'http.html:"{prod}" http.component:"WordPress"'
+                queries.append(("cve_" + cve_id, q))
+
+        # Apache, Nginx, IIS banners
+        elif prod_lower in ("apache", "nginx", "iis"):
+            if vers and vers[0] != "*":
+                q = f'product:"{prod}" version:"{vers[0]}" {cve_id}'
+            else:
+                q = f'product:"{prod}" {cve_id}'
+            queries.append(("cve_" + cve_id, q))
+
+        # PHP, Node.js, Python web frameworks
+        elif prod_lower in ("php", "nodejs", "node.js", "python", "java"):
+            if vers and vers[0] != "*":
+                q = f'http.component:"{prod}" version:"{vers[0]}" {cve_id}'
+            else:
+                q = f'http.component:"{prod}" {cve_id}'
+            queries.append(("cve_" + cve_id, q))
+
+        # Database systems
+        elif prod_lower in ("mysql", "postgresql", "mongodb", "redis", "elasticsearch"):
+            if vers and vers[0] != "*":
+                q = f'product:"{prod}" version:"{vers[0]}" {cve_id}'
+            else:
+                q = f'product:"{prod}" {cve_id}'
+            queries.append(("cve_" + cve_id, q))
+
+        # Generic: search for product name in HTML + CVE ID
+        else:
+            q = f'http.html:"{prod}" {cve_id}'
+            queries.append(("cve_" + cve_id, q))
+
+    if not quiet and queries:
+        print(f"    [CVE] {cve_id}: {len(queries)} query(ies) from {len(products)} product(s)")
+
+    return queries
+
+
 def registrable_match(host: str, mine: set) -> str:
     """Return the owned domain if host equals it or is a subdomain of it."""
     if not host:
@@ -268,11 +402,14 @@ def build_queries(args, country: str) -> list:
       * --query   — ONE raw passthrough filter tagged "custom", replacing the
                     catalog so a specific fingerprint/CVE test doesn't burn a
                     query credit on every category.
+      * --vuln    — CVE-based detection: fetch CVE details from NVD, extract
+                    affected products, build fingerprint queries to find instances
     --cn estate discovery runs first in either mode; --country and --net scoping
     compose onto every query the same way.
     """
     nets = getattr(args, "nets", []) or []
     net_batch = getattr(args, "net_batch", 10)
+    quiet = getattr(args, "quiet", False)
 
     def scoped(base: str):
         base = base.strip()
@@ -283,6 +420,25 @@ def build_queries(args, country: str) -> list:
     if args.cn:
         # Estate-discovery: find YOUR OWN hosts via your TLS cert CN
         queries.append(("estate_by_cert", f'ssl.cert.subject.cn:"{args.cn}"'))
+
+    # CVE-based detection: replaces the dork catalog if provided
+    vuln = getattr(args, "vuln", None)
+    if vuln:
+        if not quiet:
+            print(f"[*] Loading CVEs from {vuln}...")
+        cve_ids = load_cves(vuln)
+        if not quiet:
+            print(f"[*] Fetching NVD data for {len(cve_ids)} CVE(s)...")
+        for cve_id in cve_ids:
+            time.sleep(0.1)  # Be nice to NVD API
+            cve_info = fetch_cve_info(cve_id)
+            cve_queries = cve_to_shodan_queries(cve_info, quiet=quiet)
+            for cat, q_base in cve_queries:
+                for q in scoped(q_base.format(country=country)):
+                    queries.append((cat, q))
+        if not queries:
+            print("[!] No CVE-based queries generated. Check your CVE list and try again.")
+        return queries
 
     raw = getattr(args, "query", None)
     if raw:
@@ -363,13 +519,16 @@ def run_shodan(args, mine: set, ts: str) -> None:
     if not key:
         sys.exit("SHODAN_API_KEY not set.  export SHODAN_API_KEY=...  (from shodan.io Account page)")
 
+    quiet = getattr(args, "quiet", False)
+
     # --test / credential + plan check (free, uses no query credits)
     try:
         info = shodan_apiinfo(key)
     except Exception as e:
         sys.exit(f"[!] Shodan key check failed: {e}")
-    print(f"[*] Shodan plan: {info.get('plan')} | query credits: {info.get('query_credits')} "
-          f"| scan credits: {info.get('scan_credits')}")
+    if not quiet:
+        print(f"[*] Shodan plan: {info.get('plan')} | query credits: {info.get('query_credits')} "
+              f"| scan credits: {info.get('scan_credits')}")
     if args.test:
         print("[*] Key is valid. (Search API needs a paid membership + query credits.)")
         return
@@ -385,14 +544,16 @@ def run_shodan(args, mine: set, ts: str) -> None:
     # Build the query set (raw --query overrides the dork catalog)
     queries = build_queries(args, country)
 
-    print(f"[*] {len(queries)} query(ies) x up to {args.pages} page(s). "
-          f"Each page = 1 query credit.\n")
+    if not quiet:
+        print(f"[*] {len(queries)} query(ies) x up to {args.pages} page(s). "
+              f"Each page = 1 query credit.\n")
 
     for cat, q in queries:
         for p in range(1, args.pages + 1):
             res = shodan_search(q, key, p)
             if res["error"]:
-                print(f"    [{cat}] p{p}: err {res['error']}")
+                if not quiet:
+                    print(f"    [{cat}] p{p}: err {res['error']}")
                 break
             if not res["matches"]:
                 break
@@ -420,10 +581,12 @@ def run_shodan(args, mine: set, ts: str) -> None:
                     if owned:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
-                        print(f"    [!!!] YOUR HOST SURFACED: {rec['url']} ({ip}) "
-                              f"owned:{owned} under [{cat}]{hint_label(rec)}")
-            print(f"    [{cat}] p{p}: {len(res['matches'])} matches "
-                  f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
+                        if not quiet:
+                            print(f"    [!!!] YOUR HOST SURFACED: {rec['url']} ({ip}) "
+                                  f"owned:{owned} under [{cat}]{hint_label(rec)}")
+            if not quiet:
+                print(f"    [{cat}] p{p}: {len(res['matches'])} matches "
+                      f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
             time.sleep(args.delay)
 
     write_report(ts, harvested, your_hits, raw, cross_ref=bool(mine))
@@ -502,7 +665,11 @@ def main() -> None:
                     "--query 'http.html:\"revslider\" vuln:CVE-2015-5151'. "
                     "--country/--net/--cn still compose; --only is ignored. "
                     "(vuln: needs a Shodan tier that includes the vuln filter.)")
+    ap.add_argument("--vuln", help="CVE-based detection: file of CVE IDs (one per line, e.g. "
+                    "CVE-2024-1234). Fetches NVD data, extracts affected products, and builds "
+                    "Shodan queries to find vulnerable instances. Replaces the built-in dorks.")
     ap.add_argument("--only", help="comma-separated categories to run")
+    ap.add_argument("--quiet", action="store_true", help="suppress line-by-line output during scan")
     ap.add_argument("--test", action="store_true", help="validate key + show plan, then exit")
     ap.add_argument("--delay", type=float, default=1.0, help="seconds between API calls")
     ap.add_argument("--exploit", action="store_true",
@@ -520,7 +687,8 @@ def main() -> None:
         ap.error(_exploit_err)
 
     args.nets = parse_nets(args.net) if args.net else []
-    if args.nets:
+    quiet = getattr(args, "quiet", False)
+    if args.nets and not quiet:
         print(f"[*] Scoping harvest to {len(args.nets)} network(s): {', '.join(args.nets)}")
         if len(args.nets) > args.net_batch:
             chunks = -(-len(args.nets) // args.net_batch)   # ceil div
@@ -528,10 +696,10 @@ def main() -> None:
                   f"net-chunks — multiplies query count (mind API credits / daily limits).")
 
     mine = load_mine(args.mine) if args.mine else Mine()
-    if mine:
+    if mine and not quiet:
         print(f"[*] Cross-referencing against {len(mine.domains)} owned domain(s) "
               f"and {len(mine.networks)} network(s).")
-    elif not args.test:
+    elif not args.test and not quiet:
         print("[*] No --mine file: harvest-only run "
               "(results won't be cross-referenced against your assets).")
 
