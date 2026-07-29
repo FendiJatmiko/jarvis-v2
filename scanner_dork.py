@@ -471,20 +471,34 @@ def run_shodan(args, mine: set, ts: str) -> None:
 
     quiet = getattr(args, "quiet", False)
 
+    # Open streaming text output file
+    txt_path = f"scan-{ts}.txt"
+    txt_file = open(txt_path, "w")
+
+    def log_stream(msg: str) -> None:
+        """Write to both stdout and streaming .txt file."""
+        if not quiet:
+            print(msg)
+        txt_file.write(msg + "\n")
+        txt_file.flush()
+
     # --test / credential + plan check (free, uses no query credits)
     try:
         info = shodan_apiinfo(key)
     except Exception as e:
+        txt_file.close()
         sys.exit(f"[!] Shodan key check failed: {e}")
-    if not quiet:
-        print(f"[*] Shodan plan: {info.get('plan')} | query credits: {info.get('query_credits')} "
-              f"| scan credits: {info.get('scan_credits')}")
+
+    log_stream(f"[*] Shodan plan: {info.get('plan')} | query credits: {info.get('query_credits')} "
+               f"| scan credits: {info.get('scan_credits')}")
     if args.test:
-        print("[*] Key is valid. (Search API needs a paid membership + query credits.)")
+        log_stream("[*] Key is valid. (Search API needs a paid membership + query credits.)")
+        txt_file.close()
         return
     if not info.get("query_credits"):
-        print("[!] 0 query credits — the search API will return 403. "
-              "A Shodan membership is required for host/search. Aborting harvest.")
+        log_stream("[!] 0 query credits — the search API will return 403. "
+                   "A Shodan membership is required for host/search. Aborting harvest.")
+        txt_file.close()
         return
 
     harvested = defaultdict(list)   # host -> [records]
@@ -494,16 +508,14 @@ def run_shodan(args, mine: set, ts: str) -> None:
     # Build the query set (raw --query overrides the dork catalog)
     queries = build_queries(args, country)
 
-    if not quiet:
-        print(f"[*] {len(queries)} query(ies) x up to {args.pages} page(s). "
-              f"Each page = 1 query credit.\n")
+    log_stream(f"[*] {len(queries)} query(ies) x up to {args.pages} page(s). "
+               f"Each page = 1 query credit.\n")
 
     for cat, q in queries:
         for p in range(1, args.pages + 1):
             res = shodan_search(q, key, p)
             if res["error"]:
-                if not quiet:
-                    print(f"    [{cat}] p{p}: err {res['error']}")
+                log_stream(f"    [{cat}] p{p}: err {res['error']}")
                 break
             if not res["matches"]:
                 break
@@ -531,15 +543,14 @@ def run_shodan(args, mine: set, ts: str) -> None:
                     if owned:
                         rec["owned_domain"] = owned
                         your_hits.append(rec)
-                        if not quiet:
-                            print(f"    [!!!] YOUR HOST SURFACED: {rec['url']} ({ip}) "
-                                  f"owned:{owned} under [{cat}]{hint_label(rec)}")
-            if not quiet:
-                print(f"    [{cat}] p{p}: {len(res['matches'])} matches "
-                      f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
+                        log_stream(f"    [!!!] YOUR HOST SURFACED: {rec['url']} ({ip}) "
+                                   f"owned:{owned} under [{cat}]{hint_label(rec)}")
+            log_stream(f"    [{cat}] p{p}: {len(res['matches'])} matches "
+                       f"(total avail {res['total']}, {len(harvested)} unique hosts so far)")
             time.sleep(args.delay)
 
-    write_report(ts, harvested, your_hits, raw, cross_ref=bool(mine))
+    txt_file.close()
+    write_report(ts, harvested, your_hits, raw, cross_ref=bool(mine), txt_path=txt_path)
 
     if getattr(args, "exploit", False):
         results = agent_bridge.run_exploitation(
@@ -547,11 +558,13 @@ def run_shodan(args, mine: set, ts: str) -> None:
             timeout=args.exploit_timeout, dry_run=args.exploit_dry_run)
         if not args.exploit_dry_run:
             agent_bridge.write_exploit_report(ts, results)
+            with open(txt_path, "a") as f:
+                f.write(f"\n[*] Exploitation report written (see reports above)\n")
 
 
 # --------------------------- shared report ---------------------------------
 
-def write_report(ts, harvested, your_hits, raw, cross_ref=True) -> None:
+def write_report(ts, harvested, your_hits, raw, cross_ref=True, txt_path=None) -> None:
     json_path, md_path = f"scan-{ts}.json", f"scan-{ts}.md"
     with open(json_path, "w") as f:
         json.dump({"generated": ts, "engine": "shodan", "cross_ref": cross_ref,
@@ -587,11 +600,24 @@ def write_report(ts, harvested, your_hits, raw, cross_ref=True) -> None:
             cves = sorted({c for r in recs for c in r.get("cves", [])})
             hint = hint_label({"product": "", "version": "", "cves": cves})
             f.write(f"- {label} — {', '.join(cats)}{hint}\n")
+
+    # Append final summary to streaming txt file if it exists
+    if txt_path:
+        with open(txt_path, "a") as f:
+            f.write("\n" + "=" * 80 + "\n")
+            f.write("FINAL SUMMARY\n")
+            f.write("=" * 80 + "\n")
+            if cross_ref:
+                f.write(f"[*] {len(your_hits)} of your hosts surfaced · {len(harvested)} total harvested.\n")
+            else:
+                f.write(f"[*] {len(harvested)} hosts harvested (no --mine cross-reference).\n")
+            f.write(f"[*] Reports:\n    {md_path}\n    {json_path}\n    {txt_path}\n")
+
     if cross_ref:
         print(f"\n[*] {len(your_hits)} of your hosts surfaced · {len(harvested)} total harvested.")
     else:
         print(f"\n[*] {len(harvested)} hosts harvested (no --mine cross-reference).")
-    print(f"[*] Reports:\n    {md_path}\n    {json_path}")
+    print(f"[*] Reports:\n    {md_path}\n    {json_path}\n    {txt_path}")
 
 
 def main() -> None:
