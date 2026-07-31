@@ -307,13 +307,16 @@ RECIPES = [
         "endpoint": "/wp-admin/admin-ajax.php",
         "params": {"action": "wfu_ajax_action"},
         "field": "file",
+        "downloader_endpoint": "/wp-content/plugins/wp-file-upload/wfu_file_downloader.php",
         "upload_path": "/wp-content/uploads/{filename}",
-        "payload_type": "file-upload-path-traversal",
+        "payload_type": "file-upload-two-stage-traversal",
         "source": "registry",
-        "note": "Unauth file upload RCE via path traversal (CVE-2024-11613, WordPress "
-                "File Upload <=4.24.15): wfu_file_downloader endpoint accepts unsanitized "
-                "'source' parameter allowing ../ traversal. Vendor's security patch "
-                "introduced the vulnerability. CVSS 9.8. RCE via arbitrary file write.",
+        "note": "Unauth two-stage RCE (CVE-2024-11613, WordPress File Upload <=4.24.15): "
+                "Stage 1 - Upload JSON padded with 2.1MB whitespace via AJAX (bypasses MIME). "
+                "Stage 2 - POST to wfu_file_downloader.php with unsanitized 'source' parameter "
+                "referencing uploaded JSON. Vulnerable code processes JSON, evaluates PHP filter "
+                "chains for RCE. Regression from CVE-2024-9939 patch. CVSS 9.8. No auth required. "
+                "GitHub: Sachinart/CVE-2024-11613-wp-file-upload",
     },
 ]
 
