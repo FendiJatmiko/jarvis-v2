@@ -26,8 +26,13 @@ def _looks_like_readme(text):
 def _probe_plugin(http, base, slug):
     """Actively probe a plugin's readme.txt. Returns {slug, version} if the
     plugin appears installed (real readme on a 200), else None. This finds
-    admin-only plugins (e.g. File Manager) that leave no front-end footprint."""
-    status, text = _fetch(http, f"{base}/wp-content/plugins/{slug}/readme.txt")
+    admin-only plugins (e.g. File Manager) that leave no front-end footprint.
+    Uses a short timeout (3s) to avoid hanging on unresponsive redirects."""
+    try:
+        r = http.get(f"{base}/wp-content/plugins/{slug}/readme.txt", timeout=3)
+        status, text = getattr(r, "status_code", 0), (r.text or "")
+    except Exception:
+        return None
     if status == 200 and _looks_like_readme(text):
         vm = re.search(r"Stable tag:\s*([\d.]+)", text)
         return {"slug": slug, "version": vm.group(1) if vm else ""}
@@ -75,15 +80,12 @@ def fingerprint(base_url, http, probe_slugs=None):
     # detect admin-only vulnerable plugins with no front-end assets.
     passive = set(re.findall(r"/wp-content/plugins/([\w-]+)/", home))
     if probe_slugs is None:
-        # everything we can exploit UNION the common/high-risk stack, so every
-        # track sees the real installed plugins, not just the ones we have
-        # recipes for. Track B (privesc) and SQLi plugins must be probed too —
-        # otherwise a perfect recipe never fires because the plugin, having no
-        # front-end footprint and not being in COMMON_SLUGS, is never detected.
-        probe_slugs = {r["plugin"] for r in wp_recipes.RECIPES} \
+        # Probe: plugins referenced on the page UNION plugins we have recipes for.
+        # Skip COMMON_SLUGS to avoid 60+ timeout-heavy probes when most aren't
+        # installed. If a common plugin is on the page (passive), we still get it.
+        probe_slugs = passive | {r["plugin"] for r in wp_recipes.RECIPES} \
             | {r["plugin"] for r in wp_recipes.PRIVESC_RECIPES} \
-            | {r["plugin"] for r in wp_recipes.SQLI_RECIPES} \
-            | set(wp_plugins_common.COMMON_SLUGS)
+            | {r["plugin"] for r in wp_recipes.SQLI_RECIPES}
 
     plugins = []
     for slug in sorted(passive | set(probe_slugs)):

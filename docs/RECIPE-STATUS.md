@@ -1,6 +1,6 @@
 # Recipe status ledger — proven vs. unproven
 
-**Updated:** 2026-07-23 · **Version:** v0.24.0
+**Updated:** 2026-07-31 · **Version:** v0.27.2
 **Rule (from `current-PA-capabilities.txt`):** a recipe is "PROVEN" only if it produced a live `id`
 (e.g. `uid=33(www-data)`) recorded in `~/.cache/pentest-agent/*.json`. A MATCH, a SQLi timing delta,
 an OOB signal, or a green unit-test suite does **NOT** count.
@@ -70,6 +70,24 @@ isn't on any container. Drop the plugin in, then run.
 ---
 
 ## 🪦 LEGACY / unproven
+
+- **w3-total-cache (CVE-2025-9501)** — **REMOVED from the codebase 2026-07-31**. Exploit implementation 
+  incomplete: claimed to inject PHP via comment processing but never triggered actual cache evaluation 
+  or file writes. Stub code with unverified vulnerability description.
+  
+- **sneeit-framework (CVE-2025-6389)** — **REMOVED from the codebase 2026-07-31**. Exploit sent `callback` 
+  parameter to `call_user_func()` but passed function arguments as separate POST params (incorrect). 
+  HTTP 400 responses on all targets. Stub code, never tested.
+  
+- **wpvivid-backuprestore (CVE-2026-1357)** — **REMOVED from the codebase 2026-07-31**. Exploit imported 
+  AES encryption library but never called it; sent unencrypted PHP payloads instead. CVE description 
+  requires null-byte AES key encryption; implementation missing this critical step. Stub code.
+  
+**Replacement recipes (added 2026-07-31):**
+- **front-end-users (CVE-2025-2005)** — Unauthenticated file upload via public registration form. 
+  Public PoCs available; straightforward extension bypass.
+- **drag-drop-multiple-file-upload-cf7 (CVE-2025-3515)** — CF7 plugin blocks `.php` but not `.phar`; 
+  Apache+mod_php executes `.phar` as PHP. Public PoCs available.
 
 - **revslider (CVE-2014-9735)** — **REMOVED from the codebase 2026-07-23** (restore block in the
   appendix below). Never landed a shell (0 confirmed runs); deleted 2026-07-21, reappeared, removed
