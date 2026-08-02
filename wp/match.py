@@ -67,5 +67,14 @@ def match(wp_info, ragflow_fn=None, llm_fn=None):
             synth = _synthesize(p, ragflow_fn, llm_fn)
             if synth:
                 candidates.append(synth)
+
+    # Also check for custom lab recipes (mu-plugins) that may not be detected
+    # This allows testing of custom CVEs without requiring plugin detection
+    custom_lab_plugins = {"bricks", "custom-css-js-php"}
+    for plugin_slug in custom_lab_plugins:
+        recs = wp_recipes.find_recipes(plugin_slug)
+        if recs:
+            candidates.extend(recs)
+
     candidates.sort(key=lambda c: 0 if c.get("source") == "registry" else 1)
     return candidates
