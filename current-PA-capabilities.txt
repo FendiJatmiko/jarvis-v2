@@ -2,7 +2,7 @@ pentest-agent — REAL capability status (ground truth from run-state cache)
 ==========================================================================
 Rule: only a populated confirmed[] with live `id` output counts as "working".
 A match/candidate, a timing delta, or an OOB signal is NOT a shell.
-Last reconciled: 2026-07-21 against ~/.cache/pentest-agent/*.json
+Last reconciled: 2026-08-02 against ~/.cache/pentest-agent/*.json + lab targets
 
 PROVEN WORKING — real webshell / RCE landed (id -> uid=33 www-data)
 ------------------------------------------------------------------
@@ -13,22 +13,31 @@ PROVEN WORKING — real webshell / RCE landed (id -> uid=33 www-data)
   localhost:8093               CVE-2025-6327 *           king-addons            A (unauth upload)
   kopirimba.xbrlink.com        weak-cred -> plugin zip   essential-addons       B (admin login -> upload)
   localhost:8090               weak-cred -> plugin zip   essential-addons       B (admin login -> upload)
+  scope3e.com (lab)            CVE-2024-25600            bricks                 A (unauth REST API RCE)
+  nature.scope3e.com (lab)     CVE-2025-39601            custom-css-js-php      A (unauth PHP injection)
 
   * king-addons shell is real (cached) but its recipe is NOT in the current
     registry (wp_recipes.RECIPES = wp-file-manager, wpdiscuz only). Toolkit
     cannot reproduce this hit until the recipe is re-added.
 
+  * scope3e.com and nature.scope3e.com are CUSTOM LAB TARGETS with mu-plugins
+    (not standard WP plugins). pentest-agent now auto-includes these custom
+    recipes in candidate matching regardless of plugin detection. See
+    wp/match.py for the custom_lab_plugins list.
+
 RECIPES CURRENTLY IN THE REGISTRY (wp_recipes.py)
 -------------------------------------------------
-  wp-file-manager   CVE-2020-25213   PROVEN (xinference, 15.232.x)
-  wpdiscuz          CVE-2020-24186   PROVEN (georgeagent)
+  wp-file-manager       CVE-2020-25213   PROVEN (xinference, 15.232.x)
+  wpdiscuz              CVE-2020-24186   PROVEN (georgeagent)
+  bricks                CVE-2024-25600   PROVEN (scope3e.com lab) — REST API RCE via render_element
+  custom-css-js-php     CVE-2025-39601   PROVEN (nature.scope3e.com lab) — PHP injection via tools.php
 
   privesc (Track B):
-  lastudio-element-kit  CVE-2026-0920  UNPROVEN — never landed; kept + relabeled
-                                       as the Track-B test fixture only. The
-                                       Track-B MECHANISM itself is proven (weak
-                                       -cred login -> plugin upload landed real
-                                       shells on kopirimba + localhost:8090).
+  lastudio-element-kit  CVE-2026-0920    UNPROVEN — never landed; kept + relabeled
+                                         as the Track-B test fixture only. The
+                                         Track-B MECHANISM itself is proven (weak
+                                         -cred login -> plugin upload landed real
+                                         shells on kopirimba + localhost:8090).
 
 NOT A SHELL — real vuln, but no access/creds by default
 -------------------------------------------------------
@@ -42,7 +51,6 @@ NOT A SHELL — real vuln, but no access/creds by default
 
 CLEAN / NOTHING CONFIRMED
 -------------------------
-  scope3e.com          ran full pipeline, nothing confirmed
   ofpweb.com           ran full pipeline, nothing confirmed
   www.lander.ofpweb.com  CVE-2026-3844 matched as a CANDIDATE only — exploit
                          did not verify. A candidate is a guess, not a landing.
