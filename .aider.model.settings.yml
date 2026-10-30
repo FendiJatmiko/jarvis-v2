@@ -1,0 +1,11 @@
+# Per-model settings for Aider. The critical bit is num_ctx: Ollama defaults to
+# a tiny 2048-token window, which silently truncates the handoff + code. Raising
+# it here is more reliable than the OLLAMA_CONTEXT_LENGTH env var and travels
+# with the repo. 8192 is a safe balance for an 8 GB GPU.
+- name: ollama/qwen2.5-coder:7b
+  extra_params:
+    num_ctx: 8192
+
+- name: ollama/qwen2.5-coder:14b
+  extra_params:
+    num_ctx: 8192

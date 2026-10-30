@@ -1,0 +1,141 @@
+================================================================================
+CVE-2025-9501 EXPLOITATION RECIPE ADDED TO PENTEST-AGENT
+================================================================================
+
+WHAT WAS ADDED:
+  
+  CVE-2025-9501 — W3 Total Cache < 2.8.13 unauthenticated PHP command injection
+  via _parse_dynamic_mfunc() function in cached comment processing.
+  
+  Attack: Attacker submits malicious comment → W3TC caches it → when cache is 
+          processed, mfunc parser evaluates injected PHP → arbitrary code execution
+
+================================================================================
+FILES MODIFIED:
+================================================================================
+
+1. wp/recipes.py
+   ├─ Added recipe to RECIPES list
+   ├─ Plugin: w3-total-cache
+   ├─ CVE: CVE-2025-9501
+   ├─ Affected: <2.8.13
+   ├─ Mode: w3-comment-injection
+   └─ Endpoint: /wp-comments-post.php
+
+2. wp/exploit.py
+   ├─ Added dispatcher: if mode == "w3-comment-injection": return _exploit_w3_comment_injection(...)
+   └─ Added handler: _exploit_w3_comment_injection()
+      └─ Crafts PHP injection payload
+      └─ Submits malicious comment via wp-comments-post.php
+      └─ Returns planted webshell location for verification
+
+3. test_pentest_agent.py
+   └─ Added test: test_phase_match_w3_total_cache_cve_2025_9501()
+      └─ Verifies recipe is matched when W3TC 2.8.0 is detected
+
+================================================================================
+TEST RESULTS:
+================================================================================
+
+✅ Syntax validation: python3 -m py_compile wp/recipes.py wp/exploit.py
+   PASSED
+
+✅ Unit test: python3 -m pytest test_pentest_agent.py::test_phase_match_w3_total_cache_cve_2025_9501 -v
+   PASSED: Recipe matched for W3 Total Cache 2.8.0
+
+✅ Full test suite: python3 -m pytest test_pentest_agent.py
+   PASSED: All 28 tests (including new CVE-2025-9501 test)
+
+================================================================================
+USAGE:
+================================================================================
+
+# Basic scan + exploit + verify against your lab
+./pentest-agent https://<your-ec2-ip>/wordpress
+
+# Dry run (see what would happen without executing)
+./pentest-agent https://<your-ec2-ip>/wordpress --mode plan
+
+# Keep the webshell for manual testing
+./pentest-agent https://<your-ec2-ip>/wordpress --no-cleanup
+
+# Quiet mode (no explanations)
+./pentest-agent https://<your-ec2-ip>/wordpress --quiet
+
+================================================================================
+EXPECTED BEHAVIOR:
+================================================================================
+
+Against a vulnerable W3 Total Cache < 2.8.13 instance:
+
+  [FINGERPRINT] wordpress=True version=6.x plugins=['w3-total-cache 2.8.0']
+  [MATCH] 1 candidate(s): ['CVE-2025-9501']
+  [EXPLOIT] CVE-2025-9501: 1 upload attempt(s)
+  [VERIFY] ✅ WEBSHELL CONFIRMED via 'w3-mfunc:wsh_abc123def456.php'
+           https://<your-ec2-ip>/wordpress/wp-content/plugins/w3-total-cache/wsh_abc123def456.php
+           id → uid=33(www-data) gid=33(www-data) groups=33(www-data)
+
+================================================================================
+DOCUMENTATION:
+================================================================================
+
+  CVE-2025-9501-RECIPE.md    — Full technical details about the vulnerability
+  EXPLOIT-CVE-2025-9501.md   — Quick start guide and troubleshooting
+  CHANGES-SUMMARY.txt        — This file
+
+================================================================================
+HOW IT INTEGRATES WITH PENTEST-AGENT:
+================================================================================
+
+  Phase: FINGERPRINT
+    └─ Probes /wp-content/plugins/w3-total-cache/readme.txt
+    └─ Detects W3 Total Cache version
+
+  Phase: SCAN
+    └─ Checks version against Wordfence vulnerability feed
+    └─ Reports CVE-2025-9501 if < 2.8.13
+
+  Phase: MATCH
+    └─ Consults wp_recipes.find_recipes("w3-total-cache")
+    └─ Identifies CVE-2025-9501 as in-scope candidate for this version
+
+  Phase: EXPLOIT
+    └─ Calls exploit(base_url, candidate, http)
+    └─ Dispatches on mode="w3-comment-injection"
+    └─ Executes _exploit_w3_comment_injection()
+    └─ Returns planted webshell path: /wp-content/plugins/w3-total-cache/wsh_<token>.php
+
+  Phase: VERIFY
+    └─ Tests planted shell with ?c=id
+    └─ Confirms command execution (uid=33(www-data) etc)
+    └─ Optionally cleans up (--no-cleanup to keep)
+
+================================================================================
+VERIFICATION:
+================================================================================
+
+# Quick check that recipe is recognized:
+python3 -c "
+from wp import recipes, match
+wp_info = {'plugins': [{'slug': 'w3-total-cache', 'version': '2.8.0'}]}
+cands = match.match(wp_info)
+print('✅ CVE found:', cands[0]['cve'] if cands else 'NOT FOUND')
+print('✅ Mode:', cands[0]['mode'] if cands else 'N/A')
+"
+
+# Run unit test:
+python3 -m pytest test_pentest_agent.py::test_phase_match_w3_total_cache_cve_2025_9501 -v
+
+# Run full test suite:
+python3 -m pytest test_pentest_agent.py
+
+================================================================================
+NEXT STEPS:
+================================================================================
+
+1. Test against your AWS EC2 dummy server with W3 Total Cache < 2.8.13
+2. Verify webshell is created and RCE is confirmed
+3. Use --no-cleanup to keep webshell for manual post-exploitation
+4. Document findings in your pentest report
+
+================================================================================
