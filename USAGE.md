@@ -2,6 +2,11 @@
 
 After reorganization, all source code is now under `src/`. Here's how to run the toolkit:
 
+> ⚠️ **IMPORTANT**: This toolkit uses **Shodan** for internet-wide discovery. You'll need a Shodan API key to scan for exposed sites.
+> - **Free tier**: Testing & validation only
+> - **Paid tier**: $49/month basic plan for production scanning
+> - **Setup**: See [SHODAN_SETUP.md](SHODAN_SETUP.md) for detailed instructions
+
 ## 1. Installation
 
 ```bash
@@ -14,30 +19,47 @@ python3 -c "from src.agents import pentest_agent; print(f'✓ Ready: v{pentest_a
 
 ## 2. Internet-Wide Discovery (Scanner)
 
-Find exposed WordPress sites using Shodan, Netlas, or Censys:
+🔑 **REQUIRES SHODAN API KEY** — See [SHODAN_SETUP.md](SHODAN_SETUP.md) for detailed setup instructions
+
+Find exposed WordPress sites using **Shodan** (recommended) or alternatives:
 
 ```bash
-# Setup: Create your domains file
+# STEP 1: Get Shodan API key (required)
+# Go to https://www.shodan.io → Register → Account → API
+# Copy your key (looks like: sk_...)
+
+# STEP 2: Set environment variable
+export SHODAN_API_KEY=sk_your_actual_key_here
+
+# STEP 3: Test your Shodan credentials (free, no credits used)
+python3 -m src.utils.scanner_dork --engine shodan --test
+
+# STEP 4: Create your domains file
 cp data/domains.txt.example domains.txt
 # Edit domains.txt with your assets (one per line)
 
-# Export your API key
-export SHODAN_API_KEY=your_api_key_here
-
-# Test your Shodan credentials (free, no credits used)
-python3 -m src.utils.scanner_dork --engine shodan --test
-
-# Scan and flag your own sites
+# STEP 5: Run discovery scan
 python3 -m src.utils.scanner_dork --engine shodan --mine domains.txt
 
-# Scope to a country to save credits
+# Optional: Scope to a country to save Shodan credits (50-80% savings)
 python3 -m src.utils.scanner_dork --engine shodan --mine domains.txt --country ID
 
-# Scan your own network (CIDR)
-python3 -m src.utils.scanner_dork --engine netlas --mine domains.txt --net 203.0.113.0/24
+# Optional: Scan your own network (CIDR) only
+python3 -m src.utils.scanner_dork --engine shodan --mine domains.txt --net 203.0.113.0/24
 
 # Output: scan-<timestamp>.md / .json
 ```
+
+**Why Shodan?**
+- Largest database of exposed services internet-wide
+- Most accurate for WordPress detection
+- Free tier for testing (--test only)
+- Paid plans from $49/month for production scanning
+
+**Alternative engines** (optional, see [SHODAN_SETUP.md](SHODAN_SETUP.md)):
+- Netlas: ~1500 queries/month free
+- Censys: Limited, academic focus
+- Google Custom Search: $100/month
 
 ## 3. Per-Site Assessment (Pentest Agent)
 
@@ -109,8 +131,10 @@ python3 -m src.agents.pentest_agent https://target.tld --no-cleanup
 ## 6. Environment Variables
 
 ```bash
-# Discovery engines
-export SHODAN_API_KEY=sk_...          # Required for Shodan
+# REQUIRED for internet-wide discovery:
+export SHODAN_API_KEY=sk_...          # ⭐ Required for scanner (get from https://shodan.io)
+
+# Optional alternative discovery engines:
 export NETLAS_API_KEY=...             # Optional for Netlas
 export CENSYS_PAT=...                 # Optional for Censys
 export GOOGLE_API_KEY=...             # Optional for Google
@@ -167,6 +191,28 @@ python3 -m src.agents.pentest_agent https://target.tld
 # Scanner looks for pentest_agent.py in src/agents/
 # Specify it explicitly if needed:
 python3 -m src.utils.scanner_dork --agent-path ./src/agents/pentest_agent.py --mine domains.txt
+```
+
+### "SHODAN_API_KEY not set" or "Invalid API key"
+```bash
+# This tool REQUIRES Shodan API key for discovery
+# See SHODAN_SETUP.md for complete setup instructions
+
+# Quick check:
+echo $SHODAN_API_KEY
+
+# If empty, set it:
+export SHODAN_API_KEY=sk_your_actual_key_here
+
+# Get free key from https://www.shodan.io → Register → Account → API
+```
+
+### "Not enough credits"
+```bash
+# Shodan paid plans have monthly query limits
+# Save credits by scoping geographically or by network:
+python3 -m src.utils.scanner_dork --engine shodan --mine domains.txt --country ID --net 10.0.0.0/8
+# Saves 50-80% of query credits
 ```
 
 ### "WORDFENCE_API_KEY not set"
