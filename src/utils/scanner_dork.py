@@ -64,7 +64,7 @@ from datetime import datetime, timezone
 
 import requests
 
-import agent_bridge
+from src.agents import agent_bridge
 
 # ---------------------------------------------------------------------------
 # Shodan queries — Shodan filter syntax (NOT Google dork syntax).
@@ -881,7 +881,7 @@ def main() -> None:
                     default="auto", dest="exploit_mode")
     ap.add_argument("--exploit-dry-run", action="store_true", dest="exploit_dry_run",
                     help="list the hosts that would be exploited, run nothing")
-    ap.add_argument("--agent-path", default="./pentest-agent.py", dest="agent_path")
+    ap.add_argument("--agent-path", default="./src/agents/pentest_agent.py", dest="agent_path")
     ap.add_argument("--exploit-timeout", type=int, default=600, dest="exploit_timeout")
     args = ap.parse_args()
 

@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-import http_client
+from src.utils import http_client
 
 def test_get_passes_timeout_and_redirects():
     c = http_client.HttpClient(timeout=9)

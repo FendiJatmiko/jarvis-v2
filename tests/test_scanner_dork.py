@@ -10,7 +10,7 @@ import importlib.util
 import pathlib
 
 _spec = importlib.util.spec_from_file_location(
-    "scanner_dork", pathlib.Path(__file__).with_name("scanner_dork.py"))
+    "scanner_dork", pathlib.Path(__file__).parent.parent / "src" / "utils" / "scanner_dork.py")
 scanner_dork = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(scanner_dork)
 
@@ -82,7 +82,7 @@ import types
 
 def _args(**kw):
     base = dict(exploit=False, mine=None, engine="shodan",
-                agent_path="scanner_dork.py")  # a file that exists
+                agent_path="./src/agents/pentest_agent.py")  # a file that exists
     base.update(kw)
     return types.SimpleNamespace(**base)
 

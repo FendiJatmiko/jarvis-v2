@@ -2,7 +2,7 @@
 import json
 import subprocess
 
-import agent_bridge
+from src.agents import agent_bridge
 
 
 def test_dedupe_collapses_multi_category_host():

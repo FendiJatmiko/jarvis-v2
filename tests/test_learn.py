@@ -1,5 +1,5 @@
 import json
-import learn
+from src.utils import learn
 
 def test_explain_parses_llm_json():
     facts = {"summary": "wp-file-manager 6.0", "request": "POST /connector.minimal.php"}
