@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
-from wp import sqli as wp_sqli
-from wp import recipes as wp_recipes
+from src.wp import sqli as wp_sqli
+from src.wp import recipes as wp_recipes
 
 RECIPE = {
     "method": "GET",

@@ -1,5 +1,5 @@
 from unittest.mock import MagicMock
-from wp import credattack as wp_credattack
+from src.wp import credattack as wp_credattack
 
 
 def test_finds_working_credential():

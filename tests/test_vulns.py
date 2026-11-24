@@ -1,6 +1,6 @@
 from unittest.mock import MagicMock
 import json
-from wp import vulns as wp_vulns
+from src.wp import vulns as wp_vulns
 
 
 # ── classify: webshell-relevance by CWE + title ──────────────────────────────

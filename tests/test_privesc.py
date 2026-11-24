@@ -1,8 +1,8 @@
 import json
 import re
 from unittest.mock import MagicMock
-from wp import recipes as wp_recipes
-from wp import privesc as wp_privesc
+from src.wp import recipes as wp_recipes
+from src.wp import privesc as wp_privesc
 
 
 def _recipe():

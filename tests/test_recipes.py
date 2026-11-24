@@ -1,5 +1,5 @@
 # test_recipes.py
-from wp import recipes as wp_recipes
+from src.wp import recipes as wp_recipes
 
 def test_file_manager_recipe_present():
     recs = wp_recipes.find_recipes("wp-file-manager")

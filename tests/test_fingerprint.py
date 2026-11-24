@@ -1,6 +1,6 @@
 # test_fingerprint.py
 from unittest.mock import MagicMock
-from wp import fingerprint as wp_fingerprint
+from src.wp import fingerprint as wp_fingerprint
 
 HOME_HTML = '''
 <html><head><meta name="generator" content="WordPress 6.4.2" /></head>

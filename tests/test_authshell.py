@@ -1,7 +1,7 @@
 import io
 import zipfile
 from unittest.mock import MagicMock
-from wp import authshell as wp_authshell
+from src.wp import authshell as wp_authshell
 
 
 def _http_with_cookies(names):
